@@ -4,13 +4,17 @@
 
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
 
-from stemseparator.audio_io import Track, UndecodableError, read_track, write_stem_24bit
+from stemseparator import cost
+from stemseparator.audio_io import (
+    AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Track, UndecodableError, read_track,
+    unsupported_format_message, write_stem_24bit)
 from stemseparator.layout import TrackPlan, is_inside, plan_track
 from stemseparator.separator import Separation, Separator, SeparatorError
 from stemseparator.staging import StagedSet, commit
@@ -105,3 +109,89 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
         return _failed(source, f"could not write the set: {error}")
     return TrackResult(source=source, ok=True, plan=plan, gpu_seconds=separation.gpu_seconds,
                        gpu=separation.gpu, residual_db=separation.residual_db, clipped=clipped)
+
+
+def _suffix_name(path: Path) -> str:
+    return path.suffix.lstrip(".").upper()
+
+
+def _refusal_for_file(path: Path) -> str:
+    if path.suffix.lower() in REFUSED_AUDIO_SUFFIXES:
+        return unsupported_format_message(_suffix_name(path))
+    return "not an audio file"
+
+
+def _scan_folder(folder: Path) -> tuple[list[Path], list[TrackResult]]:
+    accepted, refused = [], []
+    for child in sorted(folder.iterdir()):
+        if child.name.startswith(".") or not child.is_file():
+            continue
+        suffix = child.suffix.lower()
+        if suffix in AUDIO_SUFFIXES:
+            accepted.append(child)
+        elif suffix in REFUSED_AUDIO_SUFFIXES:
+            refused.append(_failed(child, unsupported_format_message(_suffix_name(child))))
+    return accepted, refused
+
+
+def collect_inputs(paths: list[Path]) -> tuple[list[Path], list[TrackResult]]:
+    """Expand folders (direct children only) and report what cannot be processed."""
+    files: list[Path] = []
+    refused: list[TrackResult] = []
+    for path in map(Path, paths):
+        if path.is_dir():
+            found, not_accepted = _scan_folder(path)
+            files += found
+            refused += not_accepted
+        elif not path.exists():
+            refused.append(_failed(path, "not found"))
+        elif path.suffix.lower() in AUDIO_SUFFIXES:
+            files.append(path)
+        else:
+            refused.append(_failed(path, _refusal_for_file(path)))
+    return files, refused
+
+
+@dataclass(frozen=True)
+class BatchSummary:
+    results: tuple[TrackResult, ...]
+
+    @property
+    def done(self) -> int:
+        return sum(1 for result in self.results if result.ok)
+
+    @property
+    def failed(self) -> int:
+        return len(self.results) - self.done
+
+    @property
+    def gpu_seconds(self) -> float:
+        return sum(result.gpu_seconds for result in self.results)
+
+    @property
+    def cost_usd(self) -> float | None:
+        """None if any track that used the GPU ran on a GPU without a known price."""
+        costs = [cost.cost_usd(result.gpu_seconds, result.gpu)
+                 for result in self.results if result.gpu_seconds > 0]
+        if any(value is None for value in costs):
+            return None
+        return sum(costs)
+
+
+def run_batch(sources: list[Path], *, parallel: int, report: Callable[[TrackResult], None],
+              **track_kwargs) -> BatchSummary:
+    """Threads, not processes: the work is waiting on the network."""
+    results: list[TrackResult | None] = [None] * len(sources)
+    executor = ThreadPoolExecutor(max_workers=parallel)
+    try:
+        futures = {executor.submit(process_track, source, **track_kwargs): index
+                   for index, source in enumerate(sources)}
+        for future in as_completed(futures):
+            result = future.result()
+            results[futures[future]] = result
+            report(result)
+    except BaseException:
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise
+    executor.shutdown()
+    return BatchSummary(tuple(results))

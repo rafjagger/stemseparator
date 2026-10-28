@@ -10,6 +10,9 @@ import numpy as np
 import soundfile as sf
 
 AUDIO_SUFFIXES = (".flac", ".wav", ".aif", ".aiff")
+# Audio formats we recognise but refuse; a folder scan reports these instead of skipping them.
+REFUSED_AUDIO_SUFFIXES = (".mp3", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma", ".mp4",
+                          ".alac", ".ape", ".wv")
 ACCEPTED_HEADER_FORMATS = ("WAV", "WAVEX", "RF64", "FLAC", "AIFF")
 # Largest value PCM_24 can hold; +1.0 would wrap to negative full scale.
 MAX_24BIT = 1.0 - 2.0**-23
