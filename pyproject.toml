@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stemseparator"
+version = "0.1.0"
+description = "Local CLI that sends audio to a rented cloud GPU and writes four-stem sets for StemDeck"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.5",
+    "soundfile>=0.14",
+    "modal>=1.6",
+    "mutagen>=1.48",
+]
+
+[project.scripts]
+stemseparator = "stemseparator.cli:main_entry"
+
+[tool.setuptools.packages.find]
+where = ["src"]
