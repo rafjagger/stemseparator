@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 Raphael Eismann
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The interface between the pipeline and whatever separates a track."""
+from dataclasses import dataclass
+from typing import Protocol
+
+import numpy as np
+
+
+@dataclass(frozen=True)
+class Separation:
+    stems: np.ndarray  # float32 (4, frames, channels), order STEM_NAMES, at sample_rate
+    gpu_seconds: float
+    gpu: str  # e.g. "NVIDIA A10"; "" if unknown
+    sample_rate: int
+    residual_db: float  # mix the remote separated vs sum of stems, before any clamp
+
+
+class SeparatorError(Exception):
+    def __init__(self, message: str, transient: bool):
+        super().__init__(message)
+        self.transient = transient
+
+
+class SeparatorUnavailable(Exception):
+    """Preflight failed; the message is shown verbatim."""
+
+
+class Separator(Protocol):
+    def preflight(self) -> None: ...
+
+    def separate(
+        self, audio: np.ndarray, sample_rate: int, models: tuple[str, ...]
+    ) -> Separation: ...
