@@ -121,6 +121,20 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(fake.calls, [])
             self.assertTrue(self._run(source, fake, allow_long=True).ok)
 
+    def test_long_track_refused_from_the_header_without_decoding(self):
+        source = self._source()
+        with mock.patch.object(pipeline, "MAX_SECONDS", 0.5), \
+                mock.patch.object(pipeline, "read_track", side_effect=AssertionError("decoded")):
+            result = self._run(source)
+        self.assertEqual(result.reason, "longer than 20 min (use --long)")
+
+    def test_format_refusal_comes_before_the_length_check(self):
+        mp3 = self.inbox / "x.flac"
+        mp3.write_bytes(b"ID3" + bytes(64))
+        with mock.patch.object(pipeline, "MAX_SECONDS", 0.0):
+            result = self._run(mp3)
+        self.assertEqual(result.reason, "MP3 is not supported: use FLAC, WAV or AIFF")
+
     def test_transient_error_retried_twice_then_fails(self):
         fake = FakeSeparator(fail_times=3)
         sleeps = []

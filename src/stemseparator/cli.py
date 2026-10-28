@@ -84,16 +84,13 @@ def _print_failed(failed: list[TrackResult], out: TextIO) -> None:
 def _dry_run_line(source: Path, config: Config, naming: Naming,
                   allow_long: bool) -> tuple[str, float, str | None]:
     """Returns (line, estimated usd, failure reason or None)."""
-    refusal = pipeline.refusal_before_decode(source, config.library)
+    refusal = pipeline.refusal_before_decode(source, config.library, allow_long)
     if refusal is not None:
         return f"{source} → failed: {refusal}", 0.0, refusal
     try:
         track = read_track(source)
     except UndecodableError as error:
         return f"{source} → failed: {error}", 0.0, str(error)
-    if track.seconds > pipeline.MAX_SECONDS and not allow_long:
-        reason = "longer than 20 min (use --long)"
-        return f"{source} → failed: {reason}", 0.0, reason
     artist, album, title = resolve_names(track, naming)
     plan = plan_track(config.library, artist, album, title, source)
     first_stem = plan.stem_paths[0].relative_to(config.library)

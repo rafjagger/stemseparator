@@ -149,6 +149,15 @@ def read_tags(path: Path) -> Tags:
     )
 
 
+def read_seconds(path: Path) -> float:
+    """Length from the header alone, with the same refusals as read_track."""
+    path = Path(path)
+    _check_suffix(path)
+    info = _read_header(path)
+    _check_header(info)
+    return info.frames / info.samplerate
+
+
 def read_track(path: Path) -> Track:
     path = Path(path)
     _check_suffix(path)

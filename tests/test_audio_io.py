@@ -11,6 +11,7 @@ import soundfile as sf
 from stemseparator.audio_io import (
     MAX_24BIT,
     UndecodableError,
+    read_seconds,
     read_track,
     unsupported_format_message,
     write_stem_24bit,
@@ -52,6 +53,16 @@ class AudioIoTest(unittest.TestCase):
     def test_reads_aiff(self):
         track = read_track(self._write("a.aiff", fakes.test_signal(0.2)))
         self.assertEqual(track.audio.shape, (8820, 2))
+
+    def test_read_seconds_comes_from_the_header(self):
+        path = self._write("r.wav", fakes.test_signal(0.5, 48000), 48000)
+        self.assertAlmostEqual(read_seconds(path), 0.5)
+
+    def test_read_seconds_refuses_like_read_track(self):
+        mp3 = self.dir / "x.mp3"
+        mp3.write_bytes(b"ID3xxxx")
+        with self.assertRaisesRegex(UndecodableError, "MP3 is not supported"):
+            read_seconds(mp3)
 
     def test_three_channels_refused(self):
         path = self._write("c.wav", fakes.test_signal(0.2, channels=3))

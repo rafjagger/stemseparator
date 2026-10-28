@@ -190,6 +190,14 @@ class CliTest(unittest.TestCase):
         self.assertIn("--long", self.out.getvalue())
         self.assertEqual(allowed, 0)
 
+    def test_dry_run_refuses_a_long_track_without_decoding_it(self):
+        source = self._source()
+        with mock.patch("stemseparator.pipeline.MAX_SECONDS", 0.5), \
+                mock.patch("stemseparator.cli.read_track", side_effect=AssertionError("decoded")):
+            code = self._main("--dry-run", source)
+        self.assertEqual(code, 1)
+        self.assertIn("longer than 20 min (use --long)", self.out.getvalue())
+
     def test_ctrl_c_exits_130(self):
         source = self._source()
         with mock.patch("stemseparator.cli.run_batch", side_effect=KeyboardInterrupt):

@@ -14,7 +14,7 @@ import numpy as np
 
 from stemseparator import cost
 from stemseparator.audio_io import (
-    AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Track, UndecodableError, read_track,
+    AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Track, UndecodableError, read_seconds, read_track,
     unsupported_format_message, write_stem_24bit)
 from stemseparator.layout import TrackPlan, is_inside, plan_track
 from stemseparator.separator import Separation, Separator, SeparatorError
@@ -99,10 +99,16 @@ def _commit_set(source: Path, library: Path, separation: Separation,
     return plan, clipped
 
 
-def refusal_before_decode(source: Path, library: Path) -> str | None:
+def refusal_before_decode(source: Path, library: Path, allow_long: bool) -> str | None:
     """Reasons to skip a track that cost no decode and no GPU time; None if there is none."""
     if is_inside(source, library):
         return "is inside the library"
+    try:
+        seconds = read_seconds(source)
+    except UndecodableError as error:
+        return str(error)
+    if seconds > MAX_SECONDS and not allow_long:
+        return "longer than 20 min (use --long)"
     return None
 
 
@@ -112,15 +118,13 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
                   cancel: threading.Event | None = None) -> TrackResult:
     """`cancel` set means the user abandoned the batch: nothing more may land in the library."""
     source = Path(source)
-    refusal = refusal_before_decode(source, library)
+    refusal = refusal_before_decode(source, library, allow_long)
     if refusal is not None:
         return _failed(source, refusal)
     try:
         track = read_track(source)
     except UndecodableError as error:
         return _failed(source, str(error))
-    if track.seconds > MAX_SECONDS and not allow_long:
-        return _failed(source, "longer than 20 min (use --long)")
     if _is_cancelled(cancel):
         return _failed(source, ABANDONED_REASON)
     try:
