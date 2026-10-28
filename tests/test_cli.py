@@ -8,7 +8,7 @@ from unittest import mock
 
 import soundfile as sf
 
-from stemseparator import cli
+from stemseparator import cli, pipeline
 from stemseparator.separator import SeparatorUnavailable
 from tests import fakes
 from tests.fakes import FakeSeparator
@@ -162,6 +162,26 @@ class CliTest(unittest.TestCase):
             code = self._main(source, separator=FakeSeparator())
         self.assertEqual(code, 130)
         self.assertIn("interrupted, nothing half-written", self.err.getvalue())
+
+    def test_ctrl_c_during_the_batch_says_what_it_waits_for_and_prints_the_summary(self):
+        a, b = self._source("a.flac"), self._source("b.flac")
+        real_wait = pipeline.wait
+        calls = []
+
+        def interrupted_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise KeyboardInterrupt
+            return real_wait(*args, **kwargs)
+
+        with mock.patch.object(pipeline, "wait", interrupted_once):
+            code = self._main(a, b, separator=FakeSeparator())
+        self.assertEqual(code, 130)
+        err = self.err.getvalue()
+        self.assertIn("stopping", err)
+        self.assertIn("Ctrl-C again", err)
+        self.assertIn("interrupted, nothing half-written", err)
+        self.assertIn("done,", self.out.getvalue())
 
     def test_unknown_cost_prints_cost_unknown(self):
         source = self._source()

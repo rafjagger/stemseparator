@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import dataclasses
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -158,6 +159,32 @@ class PipelineTest(unittest.TestCase):
                 self._run(self._source())
         self.assertEqual(len(written), 2)
         self._assert_nothing_left()
+
+    def test_cancel_during_separation_writes_nothing(self):
+        cancel = threading.Event()
+
+        class CancelWhileRunning(FakeSeparator):
+            def separate(self, audio, sample_rate, models):
+                separation = super().separate(audio, sample_rate, models)
+                cancel.set()  # the second Ctrl-C arrives while the GPU call runs
+                return separation
+
+        result = process_track(self._source(), library=self.library,
+                               separator=CancelWhileRunning(), models=MODELS, naming=Naming(),
+                               allow_long=False, sleep=no_sleep, cancel=cancel)
+        self.assertFalse(result.ok)
+        self.assertIn("abandoned", result.reason)
+        self._assert_nothing_left()
+
+    def test_cancel_before_start_never_calls_the_separator(self):
+        cancel = threading.Event()
+        cancel.set()
+        fake = FakeSeparator()
+        result = process_track(self._source(), library=self.library, separator=fake,
+                               models=MODELS, naming=Naming(), allow_long=False,
+                               sleep=no_sleep, cancel=cancel)
+        self.assertFalse(result.ok)
+        self.assertEqual(fake.calls, [])
 
     def test_48k_track_written_at_44k(self):
         result = self._run(self._source(rate=48000))

@@ -3,8 +3,9 @@
 """One track from source file to a committed stem set in the library."""
 
 import shutil
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -23,6 +24,7 @@ MAX_SECONDS = 1200.0
 SUM_WARN_DB = -20.0  # placeholder; S0 measures the real ensemble residual, Task 12 sets it
 ATTEMPTS = 3
 OUTPUT_SAMPLE_RATE = 44100
+ABANDONED_REASON = "abandoned after a second Ctrl-C"
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,14 @@ def _failed(source: Path, reason: str) -> TrackResult:
     return TrackResult(source=source, ok=False, reason=reason)
 
 
+class _Abandoned(Exception):
+    pass
+
+
+def _is_cancelled(cancel: threading.Event | None) -> bool:
+    return cancel is not None and cancel.is_set()
+
+
 def _separate_with_retries(track: Track, separator: Separator, models: tuple[str, ...],
                            sleep: Callable[[float], None]) -> Separation:
     for attempt in range(ATTEMPTS):
@@ -76,18 +86,24 @@ def _write_stems(staged: StagedSet, stems: np.ndarray) -> int:
 
 
 def _commit_set(source: Path, library: Path, separation: Separation,
-                names: tuple[str, str, str]) -> tuple[TrackPlan, int]:
+                names: tuple[str, str, str],
+                cancel: threading.Event | None) -> tuple[TrackPlan, int]:
     artist, album, title = names
     with StagedSet(library) as staged:
         clipped = _write_stems(staged, separation.stems)
         shutil.copy2(source, staged.original_path)
+        # Checked as late as possible: writing takes seconds, the rename does not.
+        if _is_cancelled(cancel):
+            raise _Abandoned
         plan = commit(staged, lambda: plan_track(library, artist, album, title, source))
     return plan, clipped
 
 
 def process_track(source: Path, *, library: Path, separator: Separator, models: tuple[str, ...],
                   naming: Naming, allow_long: bool,
-                  sleep: Callable[[float], None] = time.sleep) -> TrackResult:
+                  sleep: Callable[[float], None] = time.sleep,
+                  cancel: threading.Event | None = None) -> TrackResult:
+    """`cancel` set means the user abandoned the batch: nothing more may land in the library."""
     source = Path(source)
     if is_inside(source, library):
         return _failed(source, "is inside the library")
@@ -97,6 +113,8 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
         return _failed(source, str(error))
     if track.seconds > MAX_SECONDS and not allow_long:
         return _failed(source, "longer than 20 min (use --long)")
+    if _is_cancelled(cancel):
+        return _failed(source, ABANDONED_REASON)
     try:
         separation = _separate_with_retries(track, separator, models, sleep)
     except SeparatorError as error:
@@ -105,7 +123,10 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
         return _failed(source, f"separator returned {separation.sample_rate} Hz, "
                                f"expected {OUTPUT_SAMPLE_RATE} Hz")
     try:
-        plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming))
+        plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming),
+                                    cancel)
+    except _Abandoned:
+        return _failed(source, ABANDONED_REASON)
     except Exception as error:  # the staged set is already gone; the batch continues
         return _failed(source, f"could not write the set: {error}")
     return TrackResult(source=source, ok=True, plan=plan, gpu_seconds=separation.gpu_seconds,
@@ -164,6 +185,8 @@ def collect_inputs(paths: list[Path]) -> tuple[list[Path], list[TrackResult]]:
 @dataclass(frozen=True)
 class BatchSummary:
     results: tuple[TrackResult, ...]
+    interrupted: bool = False
+    unfinished: int = 0  # not started or abandoned after Ctrl-C
 
     @property
     def done(self) -> int:
@@ -187,20 +210,84 @@ class BatchSummary:
         return sum(costs)
 
 
+class _BatchProgress:
+    """Futures in input order; each result is reported once, on the calling thread."""
+
+    def __init__(self, total: int, report: Callable[[TrackResult], None]):
+        self._total = total
+        self._report = report
+        self._index_of: dict[Future, int] = {}
+        self._results: list[TrackResult | None] = []
+
+    def add(self, future: Future) -> None:
+        self._index_of[future] = len(self._results)
+        self._results.append(None)
+
+    def _unreported(self) -> set[Future]:
+        return {future for future, index in self._index_of.items()
+                if self._results[index] is None and not future.cancelled()}
+
+    def running_count(self) -> int:
+        return sum(1 for future in self._unreported() if not future.done())
+
+    def collect(self) -> None:
+        waiting = self._unreported()
+        while waiting:
+            finished, waiting = wait(waiting, return_when=FIRST_COMPLETED)
+            for future in finished:
+                self._record(future)
+
+    def _record(self, future: Future) -> None:
+        result = future.result()
+        # Stored before reporting, so an interrupt inside report never reports it twice.
+        self._results[self._index_of[future]] = result
+        self._report(result)
+
+    def summary(self, interrupted: bool = False) -> BatchSummary:
+        results = tuple(result for result in self._results if result is not None)
+        return BatchSummary(results, interrupted, self._total - len(results))
+
+
+def _ignore_count(count: int) -> None:
+    pass
+
+
+def _stop_after_interrupt(executor: ThreadPoolExecutor, progress: _BatchProgress,
+                          cancel: threading.Event, on_stopping: Callable[[int], None],
+                          on_abandoning: Callable[[int], None]) -> BatchSummary:
+    executor.shutdown(wait=False, cancel_futures=True)
+    try:
+        on_stopping(progress.running_count())
+        progress.collect()  # their GPU time is paid; keep what they deliver
+    except KeyboardInterrupt:
+        cancel.set()
+        on_abandoning(progress.running_count())
+    return progress.summary(interrupted=True)
+
+
 def run_batch(sources: list[Path], *, parallel: int, report: Callable[[TrackResult], None],
+              cancel: threading.Event | None = None,
+              on_stopping: Callable[[int], None] = _ignore_count,
+              on_abandoning: Callable[[int], None] = _ignore_count,
               **track_kwargs) -> BatchSummary:
-    """Threads, not processes: the work is waiting on the network."""
-    results: list[TrackResult | None] = [None] * len(sources)
+    """Threads, not processes: the work is waiting on the network.
+
+    A first Ctrl-C drops queued tracks and waits for the running ones (on_stopping gets their
+    count); a second one sets `cancel`, so those write nothing, and returns without them.
+    """
+    cancel = cancel if cancel is not None else threading.Event()
+    progress = _BatchProgress(len(sources), report)
     executor = ThreadPoolExecutor(max_workers=parallel)
     try:
-        futures = {executor.submit(_process_track_safely, source, **track_kwargs): index
-                   for index, source in enumerate(sources)}
-        for future in as_completed(futures):
-            result = future.result()
-            results[futures[future]] = result
-            report(result)
+        for source in sources:
+            progress.add(executor.submit(_process_track_safely, source, cancel=cancel,
+                                         **track_kwargs))
+        progress.collect()
+    except KeyboardInterrupt:
+        return _stop_after_interrupt(executor, progress, cancel, on_stopping, on_abandoning)
     except BaseException:
-        executor.shutdown(wait=True, cancel_futures=True)
+        cancel.set()
+        executor.shutdown(wait=False, cancel_futures=True)
         raise
     executor.shutdown()
-    return BatchSummary(tuple(results))
+    return progress.summary()

@@ -20,6 +20,7 @@ EXIT_OK = 0
 EXIT_FAILED_TRACKS = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
+INTERRUPTED_LINE = "interrupted, nothing half-written (sets reported as done stay in the library)"
 
 
 def format_duration(seconds: float) -> str:
@@ -146,9 +147,27 @@ def _make_reporter(total: int, out: TextIO) -> Callable[[TrackResult], None]:
 def _print_summary(summary: BatchSummary, refused: list[TrackResult], out: TextIO) -> None:
     cost_text = format_cost(summary.cost_usd)
     cost_text += "" if summary.cost_usd is None else " (approx.)"
-    print(f"{summary.done} done, {summary.failed + len(refused)} failed · "
+    unfinished = f", {summary.unfinished} not finished" if summary.unfinished else ""
+    print(f"{summary.done} done, {summary.failed + len(refused)} failed{unfinished} · "
           f"GPU {summary.gpu_seconds:.0f} s · {cost_text}", file=out)
     _print_failed([r for r in summary.results if not r.ok] + refused, out)
+
+
+def _stopping_notice(err: TextIO) -> Callable[[int], None]:
+    def notice(running: int) -> None:
+        if running == 0:
+            print("stopping", file=err)
+            return
+        print(f"stopping: waiting for {running} running track(s) — their GPU time is already "
+              "paid; press Ctrl-C again to abandon them", file=err)
+    return notice
+
+
+def _abandoning_notice(err: TextIO) -> Callable[[int], None]:
+    def notice(running: int) -> None:
+        print(f"abandoning {running} track(s): they write nothing; the program ends when their "
+              "GPU calls return", file=err)
+    return notice
 
 
 def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -> int:
@@ -167,9 +186,13 @@ def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -
         print(f"error: {error}", file=err)
         return EXIT_USAGE
     summary = run_batch(sources, parallel=config.parallel, report=_make_reporter(len(sources), out),
+                        on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
                         library=config.library, separator=separator, models=config.models,
                         naming=naming, allow_long=allow_long)
     _print_summary(summary, refused, out)
+    if summary.interrupted:
+        print(INTERRUPTED_LINE, file=err)
+        return EXIT_INTERRUPTED
     return EXIT_FAILED_TRACKS if summary.failed or refused else EXIT_OK
 
 
@@ -204,7 +227,7 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
         return _real_run(sources, refused, config, naming, args.long,
                          separator_factory or _default_separator_factory, out, err)
     except KeyboardInterrupt:
-        print("interrupted, nothing half-written", file=err)
+        print(INTERRUPTED_LINE, file=err)
         return EXIT_INTERRUPTED
 
 

@@ -5,10 +5,13 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import soundfile as sf
 
+from stemseparator import pipeline
 from stemseparator.pipeline import BatchSummary, Naming, TrackResult, collect_inputs, run_batch
+from stemseparator.staging import staging_root
 from tests import fakes
 from tests.fakes import FakeSeparator
 
@@ -32,6 +35,29 @@ class TrackingSeparator(FakeSeparator):
         finally:
             with self._count_lock:
                 self._active -= 1
+
+
+class GatedSeparator(FakeSeparator):
+    """The first `open_calls` calls return at once; later ones hold until `gate` is set."""
+
+    def __init__(self, open_calls, **kwargs):
+        super().__init__(**kwargs)
+        self.open_calls = open_calls
+        self.gate = threading.Event()
+        self._entered = threading.Condition()
+
+    def wait_for_calls(self, count):
+        with self._entered:
+            self._entered.wait_for(lambda: len(self.calls) >= count, timeout=10)
+
+    def separate(self, audio, sample_rate, models):
+        separation = super().separate(audio, sample_rate, models)
+        with self._entered:
+            number = len(self.calls)
+            self._entered.notify_all()
+        if number > self.open_calls:
+            self.gate.wait(10)
+        return separation
 
 
 class BatchTestBase(unittest.TestCase):
@@ -138,16 +164,73 @@ class RunBatchTest(BatchTestBase):
         self._run(sources, FakeSeparator(), report=lambda r: threads.add(threading.current_thread()))
         self.assertEqual(threads, {threading.current_thread()})
 
-    def test_keyboard_interrupt_cancels_and_reraises(self):
-        sources = [self._flac(f"t{i}.flac") for i in range(4)]
-        separator = TrackingSeparator()
+    def test_first_ctrl_c_waits_for_running_tracks_and_reports_them(self):
+        sources = [self._flac(f"t{i}.flac") for i in range(3)]
+        separator = GatedSeparator(open_calls=1)
+        reported, stopping = [], []
 
-        def interrupt(result):
+        def interrupt_on_first(result):
+            reported.append(result)
+            if len(reported) == 1:
+                separator.wait_for_calls(2)  # t1 is running, t2 still queued
+                raise KeyboardInterrupt
+
+        def on_stopping(running):
+            stopping.append(running)
+            separator.gate.set()
+
+        summary = run_batch(
+            sources, parallel=1, report=interrupt_on_first, on_stopping=on_stopping,
+            library=self.library, separator=separator, models=("m",), naming=Naming(),
+            allow_long=False, sleep=lambda seconds: None)
+        self.assertEqual(stopping, [1])
+        self.assertEqual([r.source for r in reported], sources[:2])
+        self.assertTrue(summary.interrupted)
+        self.assertEqual((summary.done, summary.failed, summary.unfinished), (2, 0, 1))
+        self.assertEqual(len(separator.calls), 2)
+        self.assertEqual(len(list(self.library.rglob("*.wav"))), 8)
+
+    def test_second_ctrl_c_abandons_running_tracks_and_nothing_more_lands(self):
+        sources = [self._flac(f"t{i}.flac") for i in range(3)]
+        separator = GatedSeparator(open_calls=1)
+        cancel = threading.Event()
+        stopping, abandoning = [], []
+        finished = threading.Event()
+        real_process_track = pipeline.process_track
+        real_wait = pipeline.wait
+
+        def tracked_process_track(source, **kwargs):
+            try:
+                return real_process_track(source, **kwargs)
+            finally:
+                if Path(source) == sources[1]:
+                    finished.set()
+
+        def interrupt_on_first(result):
+            separator.wait_for_calls(2)
             raise KeyboardInterrupt
 
-        with self.assertRaises(KeyboardInterrupt):
-            self._run(sources, separator, parallel=1, report=interrupt)
-        self.assertLess(len(separator.calls), 4)
+        def wait_interrupted_after_stopping(*args, **kwargs):
+            if stopping:
+                raise KeyboardInterrupt  # the second Ctrl-C, while waiting
+            return real_wait(*args, **kwargs)
+
+        with mock.patch.object(pipeline, "process_track", tracked_process_track), \
+                mock.patch.object(pipeline, "wait", wait_interrupted_after_stopping):
+            summary = run_batch(
+                sources, parallel=1, report=interrupt_on_first, cancel=cancel,
+                on_stopping=stopping.append, on_abandoning=abandoning.append,
+                library=self.library, separator=separator, models=("m",), naming=Naming(),
+                allow_long=False, sleep=lambda seconds: None)
+        self.assertTrue(cancel.is_set())
+        self.assertEqual((stopping, abandoning), ([1], [1]))
+        self.assertTrue(summary.interrupted)
+        self.assertEqual((summary.done, summary.unfinished), (1, 2))
+
+        separator.gate.set()  # the abandoned GPU call returns
+        self.assertTrue(finished.wait(10))
+        self.assertEqual(len(list(self.library.rglob("*.wav"))), 4)
+        self.assertFalse(staging_root(self.library).exists())
 
 
 class SummaryTest(unittest.TestCase):
