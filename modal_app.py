@@ -41,8 +41,19 @@ def _model_specs(models: list[str]) -> list:
     return [MODELS[name] for name in models]
 
 
+def _commit_new_weights(downloaded: bool) -> None:
+    if not downloaded:
+        return
+    try:
+        weights.commit()
+    except Exception as error:
+        # The files are already usable in this container; a failed commit (two cold starts
+        # committing at once) only costs a download next time, not this track.
+        print(f"weights volume commit failed, continuing: {error!r}", flush=True)
+
+
 @app.function(image=image, gpu=["A10", "L4"], volumes={WEIGHTS_DIR: weights}, timeout=1800,
-              max_containers=4, scaledown_window=60)
+              max_containers=4, scaledown_window=60, memory=16384)
 def separate(upload: bytes, models: list[str]) -> dict:
     import time
 
@@ -56,12 +67,15 @@ def separate(upload: bytes, models: list[str]) -> dict:
     specs = _model_specs(models)
     audio, sample_rate = transport.decode_upload(upload)
     mix = runner.resample(audio.T, sample_rate, MODEL_SAMPLE_RATE)
-    for spec in specs:
-        runner.ensure_weights(spec)
-    weights.commit()
+    del audio
+    downloaded = [runner.download_missing(spec) for spec in specs]
+    _commit_new_weights(any(downloaded))
     device = torch.device("cuda")
-    results = [runner.run_model(spec, mix, device) for spec in specs]
-    stems = np.ascontiguousarray(np.transpose(ensemble.average_stems(results), (0, 2, 1)))
+    accumulator = ensemble.StemAccumulator()
+    for spec in specs:
+        accumulator.add(runner.run_model(spec, mix, device))
+    stems = np.ascontiguousarray(np.transpose(accumulator.mean(), (0, 2, 1)))
+    del accumulator
     residual = sumcheck.residual_db(mix.T, stems)
     return transport.encode_result(stems, time.monotonic() - started,
                                    torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual)

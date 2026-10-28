@@ -23,3 +23,8 @@ class SumcheckTest(unittest.TestCase):
         mix = test_signal()
         stems = np.stack([0.9 * mix, 0 * mix, 0 * mix, 0 * mix])
         self.assertAlmostEqual(residual_db(mix, stems), -20.0, places=2)
+
+    def test_long_signal_spanning_several_chunks(self):
+        mix = test_signal(seconds=30.0)
+        stems = np.stack([0.9 * mix, 0 * mix, 0 * mix, 0 * mix])
+        self.assertAlmostEqual(residual_db(mix, stems), -20.0, places=2)

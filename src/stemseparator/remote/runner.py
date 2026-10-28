@@ -18,6 +18,8 @@ import numpy as np
 from stemseparator.remote.registry import MSST_DIR, WEIGHTS_DIR, Checkpoint, ModelSpec
 
 _CHUNK_BYTES = 1 << 20
+# A stalled download would otherwise hold a billed GPU until the function timeout.
+DOWNLOAD_TIMEOUT_SECONDS = 60
 
 
 def resample(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
@@ -39,7 +41,7 @@ def _download(url: str, target: Path, expected_sha256: str | None) -> None:
     partial = target.with_name(f"{target.name}.part-{uuid.uuid4().hex}")
     digest = hashlib.sha256()
     try:
-        with urllib.request.urlopen(url) as response, partial.open("wb") as handle:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, partial.open("wb") as handle:
             while chunk := response.read(_CHUNK_BYTES):
                 digest.update(chunk)
                 handle.write(chunk)
@@ -54,12 +56,14 @@ def _download(url: str, target: Path, expected_sha256: str | None) -> None:
         partial.unlink(missing_ok=True)
 
 
-def _ensure_file(url: str, expected_sha256: str | None) -> Path:
+def _ensure_file(url: str, expected_sha256: str | None) -> bool:
+    """True when the file had to be downloaded."""
     target = _weights_path(url)
-    if not target.exists():
-        Path(WEIGHTS_DIR).mkdir(parents=True, exist_ok=True)
-        _download(url, target, expected_sha256)
-    return target
+    if target.exists():
+        return False
+    Path(WEIGHTS_DIR).mkdir(parents=True, exist_ok=True)
+    _download(url, target, expected_sha256)
+    return True
 
 
 def config_path(spec: ModelSpec) -> Path:
@@ -68,12 +72,24 @@ def config_path(spec: ModelSpec) -> Path:
     return Path(MSST_DIR) / spec.config
 
 
-def ensure_weights(spec: ModelSpec) -> list[Path]:
-    """Checkpoint paths in spec order; downloads what is missing. The caller commits the Volume."""
+def _remote_files(spec: ModelSpec) -> list[tuple[str, str | None]]:
+    files = [(checkpoint.url, checkpoint.sha256) for checkpoint in spec.checkpoints]
     if "://" in spec.config:
         # Configs are tiny and change with the checkpoint, so they are not hash-pinned.
-        _ensure_file(spec.config, None)
-    return [_ensure_file(checkpoint.url, checkpoint.sha256) for checkpoint in spec.checkpoints]
+        files.insert(0, (spec.config, None))
+    return files
+
+
+def download_missing(spec: ModelSpec) -> bool:
+    """Fetches what is not in WEIGHTS_DIR yet; True when anything new needs a Volume commit."""
+    downloaded = [_ensure_file(url, sha256) for url, sha256 in _remote_files(spec)]
+    return any(downloaded)
+
+
+def ensure_weights(spec: ModelSpec) -> list[Path]:
+    """Checkpoint paths in spec order, downloading what is missing."""
+    download_missing(spec)
+    return [_weights_path(checkpoint.url) for checkpoint in spec.checkpoints]
 
 
 def _msst():
