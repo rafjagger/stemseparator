@@ -59,6 +59,15 @@ def _validated_shape(result: dict) -> tuple[int, ...]:
     return tuple(shape)
 
 
+def _reject_non_finite(stems: np.ndarray) -> None:
+    # NaN passes np.clip and would be written as full scale. Any NaN or infinity makes the
+    # sum non-finite, and the sum needs no array the size of the stems.
+    if np.isfinite(np.sum(stems, dtype=np.float64)):
+        return
+    raise SeparatorError("the separator returned broken audio (NaN or infinite samples)",
+                         transient=False)
+
+
 def decode_result(result: dict) -> Separation:
     shape = _validated_shape(result)
     data = result.get("stems")
@@ -75,5 +84,7 @@ def decode_result(result: dict) -> Separation:
         gpu = str(result["gpu"])
     except (KeyError, TypeError, ValueError):
         raise _malformed("gpu_seconds, gpu or residual_db missing or invalid") from None
-    stems = np.frombuffer(data, dtype="<f4").reshape(shape).astype(np.float32)
+    # A view, not a copy: a 20-minute track is 1.7 GB. Nothing downstream writes into it.
+    stems = np.frombuffer(data, dtype="<f4").reshape(shape)
+    _reject_non_finite(stems)
     return Separation(stems, gpu_seconds, gpu, sample_rate, residual_db)

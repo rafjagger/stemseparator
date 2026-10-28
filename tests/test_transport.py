@@ -48,6 +48,21 @@ class ResultTest(unittest.TestCase):
         result = encode_result(self._stems(), 1.0, "", 44100, -np.inf)
         self.assertEqual(decode_result(result).residual_db, -np.inf)
 
+    def test_result_with_nan_or_infinity_fails_permanently(self):
+        for bad in (np.nan, np.inf, -np.inf):
+            with self.subTest(bad=bad):
+                stems = self._stems()
+                stems[2, 100, 1] = bad
+                with self.assertRaises(SeparatorError) as caught:
+                    decode_result(encode_result(stems, 1.0, "", 44100, -40.0))
+                self.assertFalse(caught.exception.transient)
+                self.assertIn("broken audio", str(caught.exception))
+
+    def test_result_stems_are_a_view_on_the_received_bytes(self):
+        separation = decode_result(encode_result(self._stems(), 1.0, "", 44100, -40.0))
+        self.assertEqual(separation.stems.dtype, np.float32)
+        self.assertFalse(separation.stems.flags.owndata)
+
     def test_result_with_wrong_length_raises_separator_error(self):
         result = encode_result(self._stems(), 1.0, "", 44100, -40.0)
         result["stems"] = result["stems"][:-4]
