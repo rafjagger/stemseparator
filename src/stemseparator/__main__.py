@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Raphael Eismann
 # SPDX-License-Identifier: GPL-3.0-or-later
+from stemseparator.cli import main_entry
 
-import sys
-
-# Stub until stemseparator.cli lands (Task 10).
-sys.exit(2)
+main_entry()

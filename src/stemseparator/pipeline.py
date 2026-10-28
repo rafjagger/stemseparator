@@ -20,6 +20,7 @@ from stemseparator.separator import Separation, Separator, SeparatorError
 from stemseparator.staging import StagedSet, commit
 
 MAX_SECONDS = 1200.0
+SUM_WARN_DB = -20.0  # placeholder; S0 measures the real ensemble residual, Task 12 sets it
 ATTEMPTS = 3
 OUTPUT_SAMPLE_RATE = 44100
 
