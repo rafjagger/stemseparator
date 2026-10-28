@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -140,6 +141,14 @@ class SeparateTest(unittest.TestCase):
         with self.assertRaises(SeparatorError) as caught:
             separator.separate(fakes.test_signal(0.1), 44100, ("scnet_xl_ihf",))
         self.assertFalse(caught.exception.transient)
+
+    def test_separate_turns_an_upload_that_cannot_be_encoded_into_a_permanent_error(self):
+        separator = ModalSeparator(lookup=_refuse_lookup, token_present=lambda: True)
+        with mock.patch.object(transport, "encode_upload", side_effect=RuntimeError("no space")):
+            with self.assertRaises(SeparatorError) as caught:
+                separator.separate(fakes.test_signal(0.1), 44100, ("scnet_xl_ihf",))
+        self.assertFalse(caught.exception.transient)
+        self.assertIn("no space", str(caught.exception))
 
 
 class ClassifyTest(unittest.TestCase):

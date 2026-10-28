@@ -73,7 +73,11 @@ class ModalSeparator:
 
     def separate(self, audio: np.ndarray, sample_rate: int,
                  models: tuple[str, ...]) -> Separation:
-        upload = transport.encode_upload(audio, sample_rate)
+        try:
+            upload = transport.encode_upload(audio, sample_rate)
+        except Exception as error:
+            raise SeparatorError(f"could not prepare the track for upload: {error}",
+                                 transient=False) from error
         try:
             result = self._lookup(APP_NAME, "separate").remote(upload, list(models))
         except Exception as error:

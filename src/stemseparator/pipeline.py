@@ -112,6 +112,14 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
                        gpu=separation.gpu, residual_db=separation.residual_db, clipped=clipped)
 
 
+def _process_track_safely(source: Path, **track_kwargs) -> TrackResult:
+    """A bug in one track must not cost the others their GPU time; Ctrl-C still stops."""
+    try:
+        return process_track(source, **track_kwargs)
+    except Exception as error:
+        return _failed(Path(source), f"internal error: {error!r}")
+
+
 def _suffix_name(path: Path) -> str:
     return path.suffix.lstrip(".").upper()
 
@@ -185,7 +193,7 @@ def run_batch(sources: list[Path], *, parallel: int, report: Callable[[TrackResu
     results: list[TrackResult | None] = [None] * len(sources)
     executor = ThreadPoolExecutor(max_workers=parallel)
     try:
-        futures = {executor.submit(process_track, source, **track_kwargs): index
+        futures = {executor.submit(_process_track_safely, source, **track_kwargs): index
                    for index, source in enumerate(sources)}
         for future in as_completed(futures):
             result = future.result()

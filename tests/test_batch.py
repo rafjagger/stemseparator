@@ -111,6 +111,20 @@ class RunBatchTest(BatchTestBase):
         self.assertEqual(len(reported), 3)
         self.assertEqual([r.source for r in summary.results], sources)
 
+    def test_unexpected_error_in_one_track_fails_only_that_track(self):
+        sources = [self._flac("a.flac"), self._flac("b.flac"), self._flac("c.flac")]
+
+        class BrokenOnB(FakeSeparator):
+            def separate(self, audio, sample_rate, models):
+                if len(self.calls) == 1:
+                    self.calls.append((0, models))
+                    raise ValueError("odd")
+                return super().separate(audio, sample_rate, models)
+
+        summary = self._run(sources, BrokenOnB(), parallel=1)
+        self.assertEqual((summary.done, summary.failed), (2, 1))
+        self.assertEqual(summary.results[1].reason, "internal error: ValueError('odd')")
+
     def test_batch_never_exceeds_parallel(self):
         sources = [self._flac(f"t{i}.flac") for i in range(5)]
         separator = TrackingSeparator()
