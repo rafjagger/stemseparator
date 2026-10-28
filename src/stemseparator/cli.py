@@ -13,6 +13,7 @@ from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_
 from stemseparator.layout import plan_track
 from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
+from stemseparator.remote.registry import MODELS
 from stemseparator.separator import Separator, SeparatorUnavailable
 
 EXIT_OK = 0
@@ -156,6 +157,11 @@ def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -
         return EXIT_FAILED_TRACKS
     try:
         separator = factory()
+    except Exception as error:
+        # A missing modal install or a broken client is a setup problem, not a crash.
+        print(f"error: cannot set up the separator: {error}", file=err)
+        return EXIT_USAGE
+    try:
         separator.preflight()
     except SeparatorUnavailable as error:
         print(f"error: {error}", file=err)
@@ -174,7 +180,8 @@ def _default_separator_factory() -> Separator:
 
 
 def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None = None,
-         config_path: Path = DEFAULT_CONFIG_PATH, known_models: frozenset[str] | None = None,
+         config_path: Path = DEFAULT_CONFIG_PATH,
+         known_models: frozenset[str] | None = frozenset(MODELS),
          out: TextIO = sys.stdout, err: TextIO = sys.stderr) -> int:
     parser = _build_parser(err)
     try:

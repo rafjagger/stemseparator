@@ -117,6 +117,23 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("m1", self.err.getvalue())
 
+    def test_default_known_models_are_the_registry(self):
+        code = cli.main([str(self._source())], separator_factory=refuse_factory,
+                        config_path=self.config_path, out=self.out, err=self.err)
+        self.assertEqual(code, 2)
+        self.assertIn("m1", self.err.getvalue())
+        self.assertIn("scnet_xl_ihf", self.err.getvalue())
+
+    def test_separator_that_cannot_be_built_exits_2_without_traceback(self):
+        def broken_factory():
+            raise ImportError("No module named 'modal'")
+        code = cli.main([str(self._source())], separator_factory=broken_factory,
+                        config_path=self.config_path, known_models=None,
+                        out=self.out, err=self.err)
+        self.assertEqual(code, 2)
+        self.assertIn("No module named 'modal'", self.err.getvalue())
+        self.assertNotIn("Traceback", self.err.getvalue())
+
     def test_bad_config_exits_2_with_path(self):
         self._write_config("parallel = 0\n")
         code = self._main(self._source())
