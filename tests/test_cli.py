@@ -240,6 +240,23 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("cost unknown", self.out.getvalue())
 
+    def test_stems_that_do_not_add_up_print_a_warning(self):
+        code = self._main(self._source(), separator=FakeSeparator(weights=(0.4, 0.3, 0.0, 0.0)))
+        self.assertEqual(code, 0, self.err.getvalue())
+        self.assertIn("  warning: stems do not add up to the mix (residual -10.5 dB)",
+                      self.out.getvalue())
+        self.assertNotIn("clipped", self.out.getvalue())
+
+    def test_clipped_samples_print_a_warning(self):
+        code = self._main(self._source(), separator=FakeSeparator(weights=(2.0, 0.0, 0.0, -1.0)))
+        self.assertEqual(code, 0, self.err.getvalue())
+        self.assertRegex(self.out.getvalue(), r"\n  warning: \d+ sample\(s\) clipped\n")
+        self.assertNotIn("do not add up", self.out.getvalue())
+
+    def test_clean_result_prints_no_warning(self):
+        self._main(self._source(), separator=FakeSeparator())
+        self.assertNotIn("warning", self.out.getvalue())
+
     def test_format_helpers(self):
         self.assertEqual(cli.format_duration(252), "4:12")
         self.assertEqual(cli.format_duration(65.4), "1:05")
