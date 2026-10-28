@@ -66,19 +66,27 @@ class StagingTest(unittest.TestCase):
         self.assertFalse(staging_root(self.library).exists())
 
     def test_parallel_commits_with_one_title_get_distinct_names(self):
-        barrier = threading.Barrier(2)
+        planned = [threading.Event(), threading.Event()]
         plans, errors = [], []
 
-        def worker():
+        def plan_for(index):
+            def plan():
+                result = plan_track(self.library, "Artist", "Album", "Intro", self.source)
+                planned[index].set()
+                # Without the lock the other worker plans now, before any rename happened.
+                planned[1 - index].wait(timeout=0.3)
+                return result
+            return plan
+
+        def worker(index):
             try:
                 with StagedSet(self.library) as staged:
                     _fill(staged)
-                    barrier.wait(timeout=10)
-                    plans.append(commit(staged, self._plan_for()))
+                    plans.append(commit(staged, plan_for(index)))
             except Exception as error:  # surfaced below
                 errors.append(error)
 
-        threads = [threading.Thread(target=worker) for _ in range(2)]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(2)]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -88,6 +96,50 @@ class StagingTest(unittest.TestCase):
         stems = [p for p in _files_under(self.library) if p.suffix == ".wav"]
         self.assertEqual(len(stems), 8)
         self.assertEqual(len(_files_under(self.library)), 10)
+
+    def test_concurrent_job_creation_and_exit_do_not_race(self):
+        errors = []
+
+        def churn():
+            try:
+                for _ in range(100):
+                    with StagedSet(self.library):
+                        pass
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=churn) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        self.assertEqual(errors, [])
+        self.assertFalse(staging_root(self.library).exists())
+
+    def test_stat_failure_removes_job_folder(self):
+        with mock.patch.object(Path, "stat", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                StagedSet(self.library)
+        self.assertFalse(staging_root(self.library).exists())
+
+    def test_failing_rollback_does_not_mask_original_error(self):
+        real_rename = os.rename
+        calls = []
+
+        def flaky(src, dst):
+            calls.append(src)
+            if len(calls) == 3:
+                raise OSError("first failure")
+            if len(calls) == 4:
+                raise OSError("rollback failure")
+            real_rename(src, dst)
+
+        with StagedSet(self.library) as staged:
+            _fill(staged)
+            with mock.patch("stemseparator.staging.os.rename", flaky):
+                with self.assertRaisesRegex(OSError, "first failure"):
+                    commit(staged, self._plan_for())
+            self.assertEqual(len(calls), 5)  # the second rollback step still ran
 
     def test_exit_without_commit_leaves_library_untouched(self):
         with StagedSet(self.library) as staged:
