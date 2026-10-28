@@ -202,6 +202,8 @@ def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -
     except SeparatorUnavailable as error:
         print(f"error: {error}", file=err)
         return EXIT_USAGE
+    at_once = min(config.parallel, len(sources))
+    print(f"separating {len(sources)} track(s), up to {at_once} at a time…", file=out, flush=True)
     summary = run_batch(sources, parallel=config.parallel, report=_make_reporter(len(sources), out),
                         on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
                         library=config.library, separator=separator, models=config.models,

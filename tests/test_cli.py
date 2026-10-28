@@ -73,6 +73,13 @@ class CliTest(unittest.TestCase):
         self.assertIn("2 done, 0 failed", text)
         self.assertIn("~$0.07 (approx.)", text)
 
+    def test_run_says_it_has_started_before_the_first_track_finishes(self):
+        sources = [self._source(f"t{i}.flac") for i in range(3)]
+        code = self._main(*sources, separator=FakeSeparator())
+        self.assertEqual(code, 0, self.err.getvalue())
+        first_line = self.out.getvalue().splitlines()[0]
+        self.assertEqual(first_line, "separating 3 track(s), up to 2 at a time…")
+
     def test_one_failure_exits_1_and_lists_reason(self):
         good = self._source("good.flac")
         bad = self.inbox / "bad.flac"
