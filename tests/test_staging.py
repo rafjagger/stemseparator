@@ -169,8 +169,9 @@ class StagingTest(unittest.TestCase):
             return mock.Mock(st_dev=result.st_dev + 1)
 
         with mock.patch.object(Path, "stat", fake_stat):
-            with self.assertRaises(StagingError):
+            with self.assertRaises(StagingError) as caught:
                 StagedSet(self.library)
+        self.assertIn("inside another folder on the same drive", str(caught.exception))
         self.assertFalse(staging_root(self.library).exists())
 
 

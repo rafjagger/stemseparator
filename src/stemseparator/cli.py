@@ -15,6 +15,7 @@ from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
 from stemseparator.remote.registry import MODELS
 from stemseparator.separator import Separator, SeparatorUnavailable
+from stemseparator.staging import StagedSet, StagingError
 
 EXIT_OK = 0
 EXIT_FAILED_TRACKS = 1
@@ -83,6 +84,9 @@ def _print_failed(failed: list[TrackResult], out: TextIO) -> None:
 def _dry_run_line(source: Path, config: Config, naming: Naming,
                   allow_long: bool) -> tuple[str, float, str | None]:
     """Returns (line, estimated usd, failure reason or None)."""
+    refusal = pipeline.refusal_before_decode(source, config.library)
+    if refusal is not None:
+        return f"{source} → failed: {refusal}", 0.0, refusal
     try:
         track = read_track(source)
     except UndecodableError as error:
@@ -170,10 +174,26 @@ def _abandoning_notice(err: TextIO) -> Callable[[int], None]:
     return notice
 
 
+def _library_problem(library: Path) -> str | None:
+    """Staging once up front: a library that cannot take a set fails before any GPU time."""
+    try:
+        with StagedSet(library):
+            pass
+    except StagingError as error:
+        return str(error)
+    except OSError as error:
+        return f"cannot write to the library ({library}): {error.strerror or error}"
+    return None
+
+
 def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -> int:
     if not sources:
         _print_failed(refused, out)
         return EXIT_FAILED_TRACKS
+    problem = _library_problem(config.library)
+    if problem is not None:
+        print(f"error: {problem}", file=err)
+        return EXIT_USAGE
     try:
         separator = factory()
     except Exception as error:

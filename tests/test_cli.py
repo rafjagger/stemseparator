@@ -105,6 +105,40 @@ class CliTest(unittest.TestCase):
         self.assertIn("modal token new", self.err.getvalue())
         self.assertEqual(separator.calls, [])
 
+    def test_library_on_another_drive_stops_before_the_separator_is_built(self):
+        real_stat = Path.stat
+
+        def other_device_for_library(path, *args, **kwargs):
+            result = real_stat(path, *args, **kwargs)
+            if path != self.library:
+                return result
+            return mock.Mock(st_dev=result.st_dev + 1)
+
+        source = self._source()
+        with mock.patch.object(Path, "stat", other_device_for_library):
+            code = self._main(source)
+        self.assertEqual(code, 2)
+        self.assertIn("inside another folder on the same drive", self.err.getvalue())
+        self.assertNotIn("Traceback", self.err.getvalue())
+
+    def test_unwritable_library_stops_before_the_separator_is_built(self):
+        source = self._source()
+        self.library.mkdir()
+        self.root.chmod(0o555)
+        self.addCleanup(self.root.chmod, 0o755)
+        code = self._main(source)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot write to the library", self.err.getvalue())
+        self.assertIn("Permission denied", self.err.getvalue())
+
+    def test_dry_run_refuses_a_source_inside_the_library(self):
+        self.library.mkdir()
+        source = self.library / "song.flac"
+        sf.write(source, fakes.test_signal(0.2), 44100, format="FLAC")
+        code = self._main("--dry-run", source)
+        self.assertEqual(code, 1)
+        self.assertIn("is inside the library", self.out.getvalue())
+
     def test_title_with_two_inputs_is_usage_error(self):
         a, b = self._source("a.flac"), self._source("b.flac")
         code = self._main("--title", "X", a, b, separator=FakeSeparator())

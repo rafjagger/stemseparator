@@ -99,14 +99,22 @@ def _commit_set(source: Path, library: Path, separation: Separation,
     return plan, clipped
 
 
+def refusal_before_decode(source: Path, library: Path) -> str | None:
+    """Reasons to skip a track that cost no decode and no GPU time; None if there is none."""
+    if is_inside(source, library):
+        return "is inside the library"
+    return None
+
+
 def process_track(source: Path, *, library: Path, separator: Separator, models: tuple[str, ...],
                   naming: Naming, allow_long: bool,
                   sleep: Callable[[float], None] = time.sleep,
                   cancel: threading.Event | None = None) -> TrackResult:
     """`cancel` set means the user abandoned the batch: nothing more may land in the library."""
     source = Path(source)
-    if is_inside(source, library):
-        return _failed(source, "is inside the library")
+    refusal = refusal_before_decode(source, library)
+    if refusal is not None:
+        return _failed(source, refusal)
     try:
         track = read_track(source)
     except UndecodableError as error:

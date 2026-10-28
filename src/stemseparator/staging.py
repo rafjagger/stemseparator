@@ -46,9 +46,10 @@ class StagedSet:
     def _require_same_filesystem(self, library: Path) -> None:
         if self._job.stat().st_dev == library.stat().st_dev:
             return
+        # The staging folder sits next to the library so a set can be renamed in at once.
         raise StagingError(
-            f"{library} is on a different filesystem than its staging folder; "
-            "an atomic rename is not possible")
+            f"the library ({library}) must be a folder inside another folder on the same drive "
+            "(not the drive itself)")
 
     def __enter__(self) -> "StagedSet":
         return self
