@@ -121,6 +121,17 @@ class CollectInputsTest(BatchTestBase):
         files, _ = collect_inputs([b, a])
         self.assertEqual(files, [b, a])
 
+    def test_same_file_twice_is_kept_once(self):
+        a = self._flac("a.flac")
+        files, refused = collect_inputs([a, self.inbox / "." / "a.flac"])
+        self.assertEqual(files, [a])
+        self.assertEqual(refused, [])
+
+    def test_folder_plus_a_file_inside_it_keeps_each_file_once_in_first_seen_order(self):
+        a, b = self._flac("a.flac"), self._flac("b.flac")
+        files, _ = collect_inputs([b, self.inbox])
+        self.assertEqual(files, [b, a])
+
 
 class RunBatchTest(BatchTestBase):
     def _run(self, sources, separator, parallel=2, report=None):

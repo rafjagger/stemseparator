@@ -194,6 +194,19 @@ def _scan_folder(folder: Path) -> tuple[list[Path], list[TrackResult]]:
     return accepted, refused
 
 
+def _without_duplicates(files: list[Path]) -> list[Path]:
+    """The same track given twice would be separated and paid for twice."""
+    seen: set[Path] = set()
+    unique = []
+    for path in files:
+        key = path.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
 def collect_inputs(paths: list[Path]) -> tuple[list[Path], list[TrackResult]]:
     """Expand folders (direct children only) and report what cannot be processed."""
     files: list[Path] = []
@@ -209,7 +222,7 @@ def collect_inputs(paths: list[Path]) -> tuple[list[Path], list[TrackResult]]:
             files.append(path)
         else:
             refused.append(_failed(path, _refusal_for_file(path)))
-    return files, refused
+    return _without_duplicates(files), refused
 
 
 @dataclass(frozen=True)
