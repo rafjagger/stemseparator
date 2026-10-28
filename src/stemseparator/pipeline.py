@@ -24,6 +24,9 @@ MAX_SECONDS = 1200.0
 SUM_WARN_DB = -20.0  # placeholder; S0 measures the real ensemble residual, Task 12 sets it
 ATTEMPTS = 3
 OUTPUT_SAMPLE_RATE = 44100
+# Resampling may round the length a little; a larger gap means the stems are not this track.
+FRAME_TOLERANCE_MIN = 64
+FRAME_TOLERANCE_RATIO = 0.001
 ABANDONED_REASON = "abandoned after a second Ctrl-C"
 
 
@@ -112,6 +115,21 @@ def refusal_before_decode(source: Path, library: Path, allow_long: bool) -> str 
     return None
 
 
+def _result_problem(track: Track, separation: Separation) -> str | None:
+    if separation.sample_rate != OUTPUT_SAMPLE_RATE:
+        return (f"separator returned {separation.sample_rate} Hz, "
+                f"expected {OUTPUT_SAMPLE_RATE} Hz")
+    _, frames, channels = separation.stems.shape
+    if channels != 2:
+        return f"separator returned {channels} channel(s), expected 2"
+    expected = round(len(track.audio) * OUTPUT_SAMPLE_RATE / track.sample_rate)
+    tolerance = max(FRAME_TOLERANCE_MIN, expected * FRAME_TOLERANCE_RATIO)
+    if abs(frames - expected) > tolerance:
+        return (f"separator returned the wrong length ({frames} frames, "
+                f"expected about {expected})")
+    return None
+
+
 def process_track(source: Path, *, library: Path, separator: Separator, models: tuple[str, ...],
                   naming: Naming, allow_long: bool,
                   sleep: Callable[[float], None] = time.sleep,
@@ -131,9 +149,9 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
         separation = _separate_with_retries(track, separator, models, sleep)
     except SeparatorError as error:
         return _failed(source, str(error))
-    if separation.sample_rate != OUTPUT_SAMPLE_RATE:
-        return _failed(source, f"separator returned {separation.sample_rate} Hz, "
-                               f"expected {OUTPUT_SAMPLE_RATE} Hz")
+    problem = _result_problem(track, separation)
+    if problem is not None:
+        return _failed(source, problem)
     try:
         plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming),
                                     cancel)

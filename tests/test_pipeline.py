@@ -218,6 +218,29 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("48000", result.reason)
         self._assert_nothing_left()
 
+    def _reshaping_separator(self, reshape):
+        class Reshaped(FakeSeparator):
+            def separate(self, audio, sample_rate, models):
+                good = super().separate(audio, sample_rate, models)
+                return dataclasses.replace(good, stems=reshape(good.stems))
+        return Reshaped()
+
+    def test_mono_result_fails_and_writes_nothing(self):
+        result = self._run(self._source(), self._reshaping_separator(lambda s: s[:, :, :1]))
+        self.assertFalse(result.ok)
+        self.assertIn("channel", result.reason)
+        self._assert_nothing_left()
+
+    def test_result_of_the_wrong_length_fails_and_writes_nothing(self):
+        result = self._run(self._source(), self._reshaping_separator(lambda s: s[:, :-1000]))
+        self.assertFalse(result.ok)
+        self.assertIn("length", result.reason)
+        self._assert_nothing_left()
+
+    def test_result_a_few_frames_off_is_accepted(self):
+        result = self._run(self._source(), self._reshaping_separator(lambda s: s[:, :-10]))
+        self.assertTrue(result.ok, result.reason)
+
     def test_residual_reported(self):
         result = self._run(self._source(), FakeSeparator(weights=(0.4, 0.3, 0.2, 0.0)))
         self.assertAlmostEqual(result.residual_db, 20 * np.log10(0.1), delta=0.1)
