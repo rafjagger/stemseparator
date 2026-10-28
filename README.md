@@ -24,11 +24,19 @@ separation and reused from there.
 
 ## Use
 
+The command lives in the venv: run `source .venv/bin/activate` once per terminal, or call it as
+`.venv/bin/stemseparator`.
+
 ```
-stemseparator ~/Music/new/                    # all audio files in the folder
+stemseparator ~/Music/new/                    # the audio files directly in the folder
 stemseparator track.flac --artist X --album Y
 stemseparator --dry-run …                     # names and cost estimate, no upload
 ```
+
+A folder is read one level deep: files in its subfolders are not picked up. The same file given
+twice (or a folder plus a file inside it) is separated once. Ctrl-C stops starting new tracks and
+waits for the running ones, whose GPU time is already paid; a second Ctrl-C abandons them, and
+they write nothing.
 
 Further flags: `--title` (single track only), `--library` (overrides the config), `--long` (allow
 tracks over 20 minutes). Before the first upload the tool checks that a token exists and that the
@@ -41,6 +49,8 @@ twice; a track that still fails leaves nothing in the library.
   plus the untouched source under `originals/`.
 - GPU seconds and cost per track are approximate: wall time on the GPU times Modal's list price;
   cold starts and idle time are not in it.
+- The `--dry-run` cost is a rough guess: it assumes 0.3 GPU seconds per second of audio and model,
+  a placeholder until the first real runs have been measured.
 
 ## Config
 
