@@ -30,8 +30,7 @@ def format_duration(seconds: float) -> str:
     return f"{whole // 60}:{whole % 60:02d}"
 
 
-def format_cost(usd: float | None) -> str:
-    return "cost unknown" if usd is None else f"~${usd:.2f}"
+format_cost = cost.format_usd
 
 
 class _Parser(argparse.ArgumentParser):
