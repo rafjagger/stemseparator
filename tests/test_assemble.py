@@ -131,6 +131,10 @@ class SpatialTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._stems()
 
+    def test_a_vocal_model_naming_its_stem_in_capitals_is_read(self):
+        self.models.fractions["voice"] = {"Vocals": 0.375, "Instrumental": 0.625}
+        np.testing.assert_array_equal(self._stem(self._stems(), "vocals"), 0.375 * MIX)
+
     def test_a_rhythm_model_without_bass_raises(self):
         del self.models.fractions["four"]["bass"]
         with self.assertRaises(ValueError):

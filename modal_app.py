@@ -15,7 +15,8 @@ weights = modal.Volume.from_name("stemseparator-weights", create_if_missing=True
 
 # torch 2.11.0: the newest torch that matches the last torchaudio release (2.11.0), which
 # demucs 4.0.0 pulls in; CUDA 13.0 wheels for Python 3.11, within Modal's CUDA 13.3 driver.
-# librosa: MSST's models/bs_roformer package imports it. build-essential: demucs needs diffq,
+# librosa: MSST's models/bs_roformer package imports it. PoPE-pytorch (+ einx, torch-einops-utils,
+# approved 2026-10-29): BS PolarFormer's use_pope; torch-einops-utils 0.1.37, not the 3-day-old 0.2.0. build-essential: demucs needs diffq,
 # which has no Python 3.11 wheel and compiles a Cython extension.
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -23,7 +24,8 @@ image = (
     .uv_pip_install("torch==2.11.0", "torchaudio==2.11.0", "numpy", "soundfile", "scipy",
                     "ml_collections", "omegaconf==2.2.3", "pyyaml", "einops==0.8.1",
                     "beartype==0.14.1", "rotary_embedding_torch==0.3.5", "tqdm", "librosa",
-                    "demucs==4.0.0")
+                    "demucs==4.0.0", "PoPE-pytorch==0.2.1", "einx[torch]==0.4.3",
+                    "torch-einops-utils==0.1.37")
     .run_commands(f"git clone {MSST_REPO} {MSST_DIR}",
                   f"git -C {MSST_DIR} checkout {MSST_COMMIT}")
     .add_local_python_source("stemseparator")

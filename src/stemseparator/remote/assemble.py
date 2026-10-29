@@ -72,9 +72,17 @@ def _spatial(model_set: SpatialSet, mix: np.ndarray, run: RunModel) -> np.ndarra
     return stems
 
 
+def _lower_case_stems(run: RunModel) -> RunModel:
+    """Model configs name their stems as they please ("Vocals" in becruily's deux)."""
+    def run_lower(model: str, audio: np.ndarray) -> dict[str, np.ndarray]:
+        return {stem.lower(): signal for stem, signal in run(model, audio).items()}
+    return run_lower
+
+
 def separate_with_set(model_set: ModelSet, mix: np.ndarray, run: RunModel) -> np.ndarray:
     """mix: float32 (channels, frames). Returns float32 (4, channels, frames) in the set's
     stem_names order."""
+    run = _lower_case_stems(run)
     if isinstance(model_set, SpatialSet):
         return _spatial(model_set, mix, run)
     if isinstance(model_set, SpecialistSet):

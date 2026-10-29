@@ -77,6 +77,20 @@ class ModelSetTest(unittest.TestCase):
                 for checkpoint in MODELS[model_set.drumsep].checkpoints:
                     self.assertIsNotNone(checkpoint.sha256, name)
 
+    def test_the_vocal_shootout_sets_swap_only_the_vocal_model_of_space4(self):
+        space4 = MODEL_SETS["space4"]
+        for name, vocals in (("space4polar", "bs_polarformer_vocals"),
+                             ("space4deux", "mel_roformer_deux_vocals")):
+            with self.subTest(name=name):
+                self.assertEqual(MODEL_SETS[name],
+                                 SpatialSet(rhythm=space4.rhythm, vocals=vocals,
+                                            drumsep=space4.drumsep, kick_stem=space4.kick_stem))
+
+    def test_the_new_vocal_models_are_hash_pinned(self):
+        for name in ("bs_polarformer_vocals", "mel_roformer_deux_vocals"):
+            for checkpoint in MODELS[name].checkpoints:
+                self.assertIsNotNone(checkpoint.sha256, name)
+
     def test_sw4_maps_the_six_stem_model_to_four_with_other_as_the_rest(self):
         sw4 = MODEL_SETS["sw4"]
         self.assertEqual(dict(sw4.picks), {"drums": "bs_roformer_sw", "bass": "bs_roformer_sw",

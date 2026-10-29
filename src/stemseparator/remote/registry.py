@@ -33,6 +33,9 @@ _DRUMSEP_FILE = "aufr33-jarredou_DrumSep_model_mdx23c_ep_141_sdr_10.8059.ckpt"
 _SW_REVISION = "2b98254b19bdab07ce225d884ec4aa9dd8aafce1"
 _SW_REPO = "https://huggingface.co/FractalSurfer/BS-RoFormer-SW-6stem"
 
+_BECRUILY_REVISION = "402dd9a19baaed8c6f1b54458ce6ae2ae19f354e"
+_BECRUILY_REPO = "https://huggingface.co/becruily/mel-band-roformer-deux"
+
 _MSST_WEIGHTS_LICENCE = ("no licence stated for the weights (MSST code: MIT); trained on "
                          "MUSDB18-HQ, whose licence is research/non-commercial")
 
@@ -123,6 +126,27 @@ MODELS: dict[str, ModelSpec] = {
                   "table): vocals 11.30, bass 14.62, drums 14.11, guitar 9.05, piano 7.83, "
                   "other 8.71"),
     ),
+    # BS-RoFormer with PoPE positions (use_pope: True): needs PoPE-pytorch in the image.
+    "bs_polarformer_vocals": ModelSpec(
+        model_type="bs_roformer",
+        config=f"{_MSST_RELEASES}/v1.0.20/model_bs_polarformer_float16.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_MSST_RELEASES}/v1.0.20/model_bs_polarformer_float16.ckpt",
+            sha256="fc8b72c3beb92caad4e14f180979c02ddf18a330182176cf6c7bb0eb6c685e87"),),
+        licence=("no licence stated for the weights (MSST code: MIT); released by ZFTurbo in "
+                 "MSST v1.0.20"),
+        reported="BS PolarFormer (vocals/other), MSST pretrained_models.md: Multisong vocals 11.00",
+    ),
+    "mel_roformer_deux_vocals": ModelSpec(
+        model_type="mel_band_roformer",
+        config=f"{_BECRUILY_REPO}/resolve/{_BECRUILY_REVISION}/config_deux_becruily.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_BECRUILY_REPO}/resolve/{_BECRUILY_REVISION}/becruily_deux.ckpt",
+            sha256="10255c02295bf3e3865d4ee50ff752d7b19b124ed5fd93b147babc4333eda3aa"),),
+        licence="cc-by-nc-4.0 on the Hugging Face model card (becruily/mel-band-roformer-deux)",
+        reported=("Mel-Band RoFormer deux (Vocals/Instrumental), becruily, model card: "
+                  "Multisong vocals 11.37, instrumental 17.55"),
+    ),
     "htdemucs_ft": ModelSpec(
         model_type="htdemucs",
         config="configs/config_musdb18_htdemucs.yaml",
@@ -190,8 +214,8 @@ ModelSet = AveragedSet | SpecialistSet | SpatialSet
 
 MODEL_SETS: dict[str, ModelSet] = {
     # Drums and bass from the best published open 4-stem model; vocals from the best published
-    # open vocal model the image can load as it is. BS PolarFormer reports 11.00 against 10.98,
-    # but needs the extra package PoPE_pytorch in the image, which is not approved.
+    # open vocal model at the time. BS PolarFormer (11.00) and becruily's deux (11.37) are
+    # shootout candidates in space4polar and space4deux.
     "specialist": SpecialistSet(
         picks=(("drums", "scnet_xl_ihf"), ("bass", "scnet_xl_ihf"),
                ("vocals", "mel_roformer_kj_vocals")),
@@ -208,6 +232,11 @@ MODEL_SETS: dict[str, ModelSet] = {
         picks=(("drums", "bs_roformer_sw"), ("bass", "bs_roformer_sw"),
                ("vocals", "bs_roformer_sw")),
         residual="other"),
+    # Shootout candidates: space4 with another vocal model, everything else the same.
+    "space4polar": SpatialSet(rhythm="scnet_xl_ihf", vocals="bs_polarformer_vocals",
+                              drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
+    "space4deux": SpatialSet(rhythm="scnet_xl_ihf", vocals="mel_roformer_deux_vocals",
+                             drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
     "space4sw": SpatialSet(rhythm="bs_roformer_sw", vocals="mel_roformer_kj_vocals",
                            drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
     "htdemucs_ft": AveragedSet(("htdemucs_ft",)),

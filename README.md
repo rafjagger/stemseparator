@@ -18,6 +18,9 @@ The separation runs on [Modal](https://modal.com) with models loaded through
 - **`sw4`**, **`space4sw`**: shootout candidates with BS-RoFormer SW (6 stems). `sw4` takes its
   drums, bass and vocals, and other is the rest (guitar, piano, other). `space4sw` is `space4`
   with SW's drums and bass in place of SCNet's.
+- **`space4polar`**, **`space4deux`**: shootout candidates, `space4` with only the vocal model
+  swapped: ZFTurbo's BS PolarFormer, or becruily's Mel-Band RoFormer "deux". MUSIC stays the
+  exact remainder.
 
 `htdemucs_ft` (Demucs v4, one fine-tuned checkpoint per stem) is there as a reference.
 
@@ -32,6 +35,8 @@ against MSST's:
 | SCNet Masked XL IHF (ensemble4) | 11.38 | 11.57 | 6.30 | 9.43 | MSST |
 | BS-RoFormer ep 17 (ensemble4) | 11.29 | 11.08 | 5.96 | 9.19 | MSST |
 | BS-RoFormer SW (sw4, space4sw) | 14.11 | 14.62 | 8.71 | 11.30 | MVSep |
+| BS PolarFormer (space4polar: vocals) | | | | 11.00 | MSST |
+| Mel-Band RoFormer deux, becruily (space4deux: vocals) | | | | 11.37 | model card |
 
 The DrumSep model is measured on its own test set (MSST): kick 14.54, snare 9.79, toms 10.63,
 hh 3.19, ride + crash 6.08. No figures are published for the ensemble or for any residual stem.
@@ -91,7 +96,7 @@ twice; a track that still fails leaves nothing in the library.
 ## Shootout: comparing model sets
 
 ```
-stemseparator --shootout track.wav --sets specialist,space4,sw4,space4sw
+stemseparator --shootout track.wav --sets specialist,space4,space4polar,space4deux,sw4,space4sw
 stemseparator --dry-run --shootout track.wav --sets …    # cost estimate per set
 stemseparator compare <library>/shootout                  # measure again, new excerpts
 ```
@@ -116,7 +121,7 @@ reference stems, so the ear decides.
 
 ```toml
 library = "~/Music/stems"                       # where stem sets go
-models = "space4"                               # model set: space4, specialist, ensemble4, sw4, space4sw, htdemucs_ft
+models = "space4"                               # model set: space4, space4polar, space4deux, specialist, ensemble4, sw4, space4sw, htdemucs_ft
 parallel = 4                                    # tracks on the GPU at once
 format = "flac"                                 # stem files: flac (default) or wav
 ```
@@ -140,6 +145,8 @@ download is checked against it. Licences as published:
 | Mel-Band RoFormer vocals (Kimberley Jensen) | Hugging Face `KimberleyJSN/melbandroformer` | MIT on the model card; community weights, training data not stated |
 | MDX23C DrumSep 6-stem (aufr33 + jarredou) | Hugging Face mirror `Sucial/MSST-WebUI`, revision-pinned; config from `SUC-DriverOld/MSST-WebUI` at a pinned commit | cc-by-nc-sa-4.0 on the mirror (non-commercial); the original release stated none and is offline |
 | BS-RoFormer SW (jarredou) | Hugging Face re-upload `FractalSurfer/BS-RoFormer-SW-6stem`, revision-pinned | unclear: the author published none, re-uploads say MIT or unknown |
+| BS PolarFormer | MSST GitHub release v1.0.20 | none stated for the weights (MSST's code is MIT) |
+| Mel-Band RoFormer deux (becruily) | Hugging Face `becruily/mel-band-roformer-deux`, revision-pinned | cc-by-nc-4.0 (non-commercial) |
 | htdemucs_ft | Meta's Demucs release | Demucs repository MIT; none stated separately for the weights |
 
 These are community and research weights with unclear terms for commercial use. That is fine for
