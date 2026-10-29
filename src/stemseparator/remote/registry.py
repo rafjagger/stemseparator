@@ -7,7 +7,7 @@ release notes state them; "Multisong" is MVSep's 100-track test set, "MUSDB" is 
 """
 from dataclasses import dataclass
 
-from stemseparator.naming import STEM_NAMES
+from stemseparator.naming import SPACE4_NAMES, STEM_NAMES
 
 MSST_REPO = "https://github.com/ZFTurbo/Music-Source-Separation-Training"
 MSST_COMMIT = "6fdad13686bb7e84d029ec66f9dbe76e65c93ebf"
@@ -106,6 +106,7 @@ MODELS: dict[str, ModelSpec] = {
 class AveragedSet:
     """Every model separates all four stems; the stems are averaged (MSST ensemble.py avg_wave)."""
     models: tuple[str, ...]
+    stem_names = STEM_NAMES
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class SpecialistSet:
     so the four stems sum back to the mix."""
     picks: tuple[tuple[str, str], ...]  # (stem, model)
     residual: str
+    stem_names = STEM_NAMES
 
     def __post_init__(self):
         stems = [stem for stem, _ in self.picks] + [self.residual]
@@ -127,7 +129,27 @@ class SpecialistSet:
         return tuple(dict.fromkeys(model for _, model in self.picks))
 
 
-ModelSet = AveragedSet | SpecialistSet
+@dataclass(frozen=True)
+class SpatialSet:
+    """Four stems by spatial job (SPACE4_NAMES): LOW = bass + kick, TOPS = drums - kick,
+    VOCALS from the vocal model, MUSIC = the mix minus the other three.
+
+    The drum model splits the rhythm model's drums stem; only its kick is used, so the drums stem
+    survives whole as LOW + TOPS and the four stems sum back to the mix.
+    """
+    rhythm: str  # a 4-stem model: its drums and bass are used
+    vocals: str  # its vocals stem is used
+    drumsep: str  # run on the drums stem
+    kick_stem: str  # the drum model's name for the kick
+    stem_names = SPACE4_NAMES
+
+    @property
+    def models(self) -> tuple[str, ...]:
+        """In run order; each once."""
+        return tuple(dict.fromkeys((self.rhythm, self.drumsep, self.vocals)))
+
+
+ModelSet = AveragedSet | SpecialistSet | SpatialSet
 
 MODEL_SETS: dict[str, ModelSet] = {
     # Drums and bass from the best published open 4-stem model; vocals from the best published

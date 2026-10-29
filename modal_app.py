@@ -71,12 +71,13 @@ def separate(upload: bytes, model_set: str) -> dict:
     _commit_new_weights(any(downloaded))
     device = torch.device("cuda")
     separated = assemble.separate_with_set(
-        chosen, mix, lambda name: runner.run_model(MODELS[name], mix, device))
+        chosen, mix, lambda name, audio: runner.run_model(MODELS[name], audio, device))
     stems = np.ascontiguousarray(np.transpose(separated, (0, 2, 1)))
     del separated
     residual = sumcheck.residual_db(mix.T, stems)
     return transport.encode_result(stems, time.monotonic() - started,
-                                   torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual)
+                                   torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual,
+                                   chosen.stem_names)
 
 
 @app.function(image=ping_image)
