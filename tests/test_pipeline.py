@@ -43,10 +43,10 @@ class PipelineTest(unittest.TestCase):
             f.write(audio)
         return path
 
-    def _run(self, source, separator=None, naming=Naming(), allow_long=False):
+    def _run(self, source, separator=None, naming=Naming(), allow_long=False, output_format="wav"):
         return process_track(
             source, library=self.library, separator=separator or FakeSeparator(), model_set=MODEL_SET,
-            naming=naming, allow_long=allow_long, sleep=no_sleep)
+            naming=naming, allow_long=allow_long, sleep=no_sleep, output_format=output_format)
 
     def _library_files(self):
         return sorted(p for p in self.library.rglob("*") if p.is_file()) if self.library.exists() else []
@@ -72,6 +72,31 @@ class PipelineTest(unittest.TestCase):
         total = sum(data for data, _ in written)
         self.assertLessEqual(float(np.max(np.abs(total - sf.read(source, dtype="float64")[0]))), 2**-22)
         self.assertLess(result.residual_db, -100)
+
+    def test_both_formats_write_24_bit_stems_that_sum_back_to_the_mix(self):
+        audio = fakes.test_signal(1.0)
+        for output_format, header in (("wav", "WAV"), ("flac", "FLAC")):
+            with self.subTest(output_format=output_format):
+                source = self._source(f"{output_format}.flac", audio=audio)
+                result = self._run(source, output_format=output_format)
+                self.assertTrue(result.ok, result.reason)
+                for path in result.plan.stem_paths:
+                    self.assertEqual(path.suffix, f".{output_format}")
+                    info = sf.info(path)
+                    self.assertEqual((info.format, info.subtype, info.samplerate),
+                                     (header, "PCM_24", 44100))
+                total = sum(sf.read(p, dtype="float64")[0] for p in result.plan.stem_paths)
+                mix = sf.read(source, dtype="float64")[0]
+                self.assertLessEqual(float(np.max(np.abs(total - mix))), 2**-22)
+
+    def test_files_are_named_after_the_stems_the_separator_returned(self):
+        fake = FakeSeparator(stem_names=("low", "tops", "music", "vocals"))
+        result = self._run(self._source(tags={"title": "T"}), fake)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([p.name for p in result.plan.stem_paths],
+                         ["T - 1 - low.wav", "T - 2 - tops.wav", "T - 3 - music.wav",
+                          "T - 4 - vocals.wav"])
+        self.assertTrue(all(p.is_file() for p in result.plan.stem_paths))
 
     def test_flags_override_tags(self):
         source = self._source(tags={"title": "T", "artist": "A", "album": "B"})

@@ -7,7 +7,7 @@ release notes state them; "Multisong" is MVSep's 100-track test set, "MUSDB" is 
 """
 from dataclasses import dataclass
 
-from stemseparator.naming import STEM_NAMES
+from stemseparator.naming import SPACE4_NAMES, STEM_NAMES
 
 MSST_REPO = "https://github.com/ZFTurbo/Music-Source-Separation-Training"
 MSST_COMMIT = "6fdad13686bb7e84d029ec66f9dbe76e65c93ebf"
@@ -21,6 +21,20 @@ _DEMUCS_RELEASES = "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer"
 # Revision-pinned, so the file behind the URL cannot change under the sha256.
 _KJ_REVISION = "ac9b0614ab3cd7f77219e18ba494dfd93956c348"
 _KJ_REPO = "https://huggingface.co/KimberleyJSN/melbandroformer"
+
+# Community mirror of aufr33 + jarredou's DrumSep: the original release page is gone (404).
+_SUCIAL_REVISION = "90b617b15bd0dc0b784f3d361faca1b51173fe44"
+_SUCIAL_REPO = "https://huggingface.co/Sucial/MSST-WebUI"
+_WEBUI_COMMIT = "2e6255b5cb9ab8b75bff29cfa4c97984b2ddff51"
+_WEBUI_RAW = f"https://raw.githubusercontent.com/SUC-DriverOld/MSST-WebUI/{_WEBUI_COMMIT}"
+_DRUMSEP_FILE = "aufr33-jarredou_DrumSep_model_mdx23c_ep_141_sdr_10.8059.ckpt"
+# Community re-upload of jarredou's BS-RoFormer SW (his account is deleted); the repo publishes
+# SHA256SUMS, and its yaml is the 4,613-byte original, not the edited 4,852-byte one elsewhere.
+_SW_REVISION = "2b98254b19bdab07ce225d884ec4aa9dd8aafce1"
+_SW_REPO = "https://huggingface.co/FractalSurfer/BS-RoFormer-SW-6stem"
+
+_BECRUILY_REVISION = "402dd9a19baaed8c6f1b54458ce6ae2ae19f354e"
+_BECRUILY_REPO = "https://huggingface.co/becruily/mel-band-roformer-deux"
 
 _MSST_WEIGHTS_LICENCE = ("no licence stated for the weights (MSST code: MIT); trained on "
                          "MUSDB18-HQ, whose licence is research/non-commercial")
@@ -86,6 +100,53 @@ MODELS: dict[str, ModelSpec] = {
         reported=("Mel-Band RoFormer vocals (Kimberley Jensen), MSST pretrained_models.md: "
                   "Multisong vocals 10.98"),
     ),
+    "mdx23c_drumsep_6stem": ModelSpec(
+        model_type="mdx23c",
+        config=f"{_WEBUI_RAW}/configs_backup/multi_stem_models/{_DRUMSEP_FILE}.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_SUCIAL_REPO}/resolve/{_SUCIAL_REVISION}/All_Models/multi_stem_models/"
+                f"{_DRUMSEP_FILE}",
+            sha256="d2a4aa53eb584d21eead358a4e66d1882ad182911be018f052b5da73be9096d0"),),
+        licence=("cc-by-nc-sa-4.0 on the Hugging Face mirror (Sucial/MSST-WebUI); the original "
+                 "release by aufr33 and jarredou stated none and is offline"),
+        reported=("MDX23C DrumSep 6-stem (kick, snare, toms, hh, ride, crash), aufr33 + jarredou "
+                  "ep 141, MSST pretrained_models.md on the DrumSep test set: kick 14.54, snare "
+                  "9.79, toms 10.63, hh 3.19, ride+crash 6.08; input is a drums stem"),
+    ),
+    "bs_roformer_sw": ModelSpec(
+        model_type="bs_roformer",
+        config=f"{_SW_REPO}/resolve/{_SW_REVISION}/BS-Rofo-SW-Fixed.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_SW_REPO}/resolve/{_SW_REVISION}/BS-Rofo-SW-Fixed.ckpt",
+            sha256="24e7d35ee9c64415673d3fd33e06a67cac2c103c5df6267ba1576459c775916e"),),
+        licence=("unclear: no licence from the author (jarredou); re-uploads state MIT or "
+                 "unknown — treat as unlicensed"),
+        reported=("BS-RoFormer SW 6-stem (bass, drums, other, vocals, guitar, piano), MVSep "
+                  "algorithms page, MVSep's own Multisong scale (not comparable with MSST's "
+                  "table): vocals 11.30, bass 14.62, drums 14.11, guitar 9.05, piano 7.83, "
+                  "other 8.71"),
+    ),
+    # BS-RoFormer with PoPE positions (use_pope: True): needs PoPE-pytorch in the image.
+    "bs_polarformer_vocals": ModelSpec(
+        model_type="bs_roformer",
+        config=f"{_MSST_RELEASES}/v1.0.20/model_bs_polarformer_float16.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_MSST_RELEASES}/v1.0.20/model_bs_polarformer_float16.ckpt",
+            sha256="fc8b72c3beb92caad4e14f180979c02ddf18a330182176cf6c7bb0eb6c685e87"),),
+        licence=("no licence stated for the weights (MSST code: MIT); released by ZFTurbo in "
+                 "MSST v1.0.20"),
+        reported="BS PolarFormer (vocals/other), MSST pretrained_models.md: Multisong vocals 11.00",
+    ),
+    "mel_roformer_deux_vocals": ModelSpec(
+        model_type="mel_band_roformer",
+        config=f"{_BECRUILY_REPO}/resolve/{_BECRUILY_REVISION}/config_deux_becruily.yaml",
+        checkpoints=(Checkpoint(
+            url=f"{_BECRUILY_REPO}/resolve/{_BECRUILY_REVISION}/becruily_deux.ckpt",
+            sha256="10255c02295bf3e3865d4ee50ff752d7b19b124ed5fd93b147babc4333eda3aa"),),
+        licence="cc-by-nc-4.0 on the Hugging Face model card (becruily/mel-band-roformer-deux)",
+        reported=("Mel-Band RoFormer deux (Vocals/Instrumental), becruily, model card: "
+                  "Multisong vocals 11.37, instrumental 17.55"),
+    ),
     "htdemucs_ft": ModelSpec(
         model_type="htdemucs",
         config="configs/config_musdb18_htdemucs.yaml",
@@ -106,6 +167,7 @@ MODELS: dict[str, ModelSpec] = {
 class AveragedSet:
     """Every model separates all four stems; the stems are averaged (MSST ensemble.py avg_wave)."""
     models: tuple[str, ...]
+    stem_names = STEM_NAMES
 
 
 @dataclass(frozen=True)
@@ -114,6 +176,7 @@ class SpecialistSet:
     so the four stems sum back to the mix."""
     picks: tuple[tuple[str, str], ...]  # (stem, model)
     residual: str
+    stem_names = STEM_NAMES
 
     def __post_init__(self):
         stems = [stem for stem, _ in self.picks] + [self.residual]
@@ -127,18 +190,56 @@ class SpecialistSet:
         return tuple(dict.fromkeys(model for _, model in self.picks))
 
 
-ModelSet = AveragedSet | SpecialistSet
+@dataclass(frozen=True)
+class SpatialSet:
+    """Four stems by spatial job (SPACE4_NAMES): LOW = bass + kick, TOPS = drums - kick,
+    VOCALS from the vocal model, MUSIC = the mix minus the other three.
+
+    The drum model splits the rhythm model's drums stem; only its kick is used, so the drums stem
+    survives whole as LOW + TOPS and the four stems sum back to the mix.
+    """
+    rhythm: str  # a 4-stem model: its drums and bass are used
+    vocals: str  # its vocals stem is used
+    drumsep: str  # run on the drums stem
+    kick_stem: str  # the drum model's name for the kick
+    stem_names = SPACE4_NAMES
+
+    @property
+    def models(self) -> tuple[str, ...]:
+        """In run order; each once."""
+        return tuple(dict.fromkeys((self.rhythm, self.drumsep, self.vocals)))
+
+
+ModelSet = AveragedSet | SpecialistSet | SpatialSet
 
 MODEL_SETS: dict[str, ModelSet] = {
     # Drums and bass from the best published open 4-stem model; vocals from the best published
-    # open vocal model the image can load as it is. BS PolarFormer reports 11.00 against 10.98,
-    # but needs the extra package PoPE_pytorch in the image, which is not approved.
+    # open vocal model at the time. BS PolarFormer (11.00) and becruily's deux (11.37) are
+    # shootout candidates in space4polar and space4deux.
     "specialist": SpecialistSet(
         picks=(("drums", "scnet_xl_ihf"), ("bass", "scnet_xl_ihf"),
                ("vocals", "mel_roformer_kj_vocals")),
         residual="other"),
     "ensemble4": AveragedSet(("scnet_masked_xl_ihf", "bs_roformer_ep17")),
+    # Four stems by spatial job. The only open drum split with a kick stem that loads at
+    # MSST_COMMIT without new packages: MVSep's Mel-Band and SCNet DrumSep score higher but have
+    # no public weights.
+    "space4": SpatialSet(rhythm="scnet_xl_ihf", vocals="mel_roformer_kj_vocals",
+                         drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
+    # Shootout candidates: BS-RoFormer SW's drums, bass and vocals; guitar, piano and other go
+    # to other as the rest of the mix.
+    "sw4": SpecialistSet(
+        picks=(("drums", "bs_roformer_sw"), ("bass", "bs_roformer_sw"),
+               ("vocals", "bs_roformer_sw")),
+        residual="other"),
+    # Shootout candidates: space4 with another vocal model, everything else the same.
+    "space4polar": SpatialSet(rhythm="scnet_xl_ihf", vocals="bs_polarformer_vocals",
+                              drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
+    "space4deux": SpatialSet(rhythm="scnet_xl_ihf", vocals="mel_roformer_deux_vocals",
+                             drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
+    "space4sw": SpatialSet(rhythm="bs_roformer_sw", vocals="mel_roformer_kj_vocals",
+                           drumsep="mdx23c_drumsep_6stem", kick_stem="kick"),
     "htdemucs_ft": AveragedSet(("htdemucs_ft",)),
 }
 
-DEFAULT_MODEL_SET = "specialist"
+DEFAULT_MODEL_SET = "space4"

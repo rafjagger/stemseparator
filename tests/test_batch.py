@@ -199,7 +199,7 @@ class RunBatchTest(BatchTestBase):
         self.assertTrue(summary.interrupted)
         self.assertEqual((summary.done, summary.failed, summary.unfinished), (2, 0, 1))
         self.assertEqual(len(separator.calls), 2)
-        self.assertEqual(len(list(self.library.rglob("*.wav"))), 8)
+        self.assertEqual(len([p for p in self.library.rglob("*.flac") if "originals" not in p.parts]), 8)
 
     def test_second_ctrl_c_abandons_running_tracks_and_nothing_more_lands(self):
         sources = [self._flac(f"t{i}.flac") for i in range(3)]
@@ -240,7 +240,7 @@ class RunBatchTest(BatchTestBase):
 
         separator.gate.set()  # the abandoned GPU call returns
         self.assertTrue(finished.wait(10))
-        self.assertEqual(len(list(self.library.rglob("*.wav"))), 4)
+        self.assertEqual(len([p for p in self.library.rglob("*.flac") if "originals" not in p.parts]), 4)
         self.assertFalse(staging_root(self.library).exists())
 
 

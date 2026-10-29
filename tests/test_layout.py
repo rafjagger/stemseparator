@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from stemseparator.layout import is_inside, plan_track
+from stemseparator.naming import SPACE4_NAMES
 
 
 class PlanTrackTest(unittest.TestCase):
@@ -14,9 +15,22 @@ class PlanTrackTest(unittest.TestCase):
         album = Path("/lib/AC_DC/Unknown Album")
         self.assertEqual(plan.album_dir, album)
         self.assertEqual(plan.title, "Intro")
-        self.assertEqual(plan.stem_paths[0], album / "Intro - 1 - drums.wav")
-        self.assertEqual(plan.stem_paths[3], album / "Intro - 4 - vocals.wav")
+        self.assertEqual(plan.stem_paths[0], album / "Intro - 1 - drums.flac")
+        self.assertEqual(plan.stem_paths[3], album / "Intro - 4 - vocals.flac")
         self.assertEqual(plan.original_path, album / "originals" / "Intro.FLAC")
+
+    def test_plan_paths_carry_the_sets_stem_names(self):
+        plan = plan_track(Path("/lib"), "A", "B", "Intro", Path("/in/x.flac"),
+                          exists=lambda p: False, stem_names=SPACE4_NAMES)
+        self.assertEqual([p.name for p in plan.stem_paths],
+                         ["Intro - 1 - low.flac", "Intro - 2 - tops.flac",
+                          "Intro - 3 - music.flac", "Intro - 4 - vocals.flac"])
+
+    def test_wav_sets_end_in_wav(self):
+        plan = plan_track(Path("/lib"), "A", "B", "Intro", Path("/in/x.wav"),
+                          exists=lambda p: False, extension="wav")
+        self.assertEqual(plan.stem_paths[0].name, "Intro - 1 - drums.wav")
+        self.assertEqual(plan.original_path.name, "Intro.wav")
 
     def test_empty_names_use_fallbacks(self):
         plan = plan_track(Path("/lib"), "", "", "", Path("/in/x.wav"),
@@ -26,7 +40,7 @@ class PlanTrackTest(unittest.TestCase):
 
     def test_clash_gets_2_then_3(self):
         album = Path("/lib/A/B")
-        taken = {album / "Intro - 1 - drums.wav", album / "originals" / "Intro (2).flac"}
+        taken = {album / "Intro - 1 - drums.flac", album / "originals" / "Intro (2).flac"}
         plan = plan_track(Path("/lib"), "A", "B", "Intro", Path("/in/x.flac"),
                           exists=lambda p: p in taken)
         self.assertEqual(plan.title, "Intro (3)")
@@ -40,7 +54,7 @@ class PlanTrackTest(unittest.TestCase):
 
     def test_clash_on_any_stem_counts(self):
         album = Path("/lib/A/B")
-        taken = {album / "Intro - 4 - vocals.wav"}
+        taken = {album / "Intro - 4 - vocals.flac"}
         plan = plan_track(Path("/lib"), "A", "B", "Intro", Path("/in/x.flac"),
                           exists=lambda p: p in taken)
         self.assertEqual(plan.title, "Intro (2)")

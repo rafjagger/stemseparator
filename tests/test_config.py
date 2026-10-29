@@ -20,7 +20,7 @@ class LoadConfigTest(unittest.TestCase):
         config = load_config(self.path)
         self.assertEqual(config, Config())
         self.assertEqual(config.library, Path("~/Music/stems").expanduser())
-        self.assertEqual(config.models, "specialist")
+        self.assertEqual(config.models, "space4")
         self.assertEqual(config.parallel, 4)
 
     def test_library_expands_tilde(self):
@@ -35,7 +35,20 @@ class LoadConfigTest(unittest.TestCase):
         self.write('models = ["scnet_xl_ihf", "bs_roformer_ep17"]\n')
         with self.assertRaises(ConfigError) as ctx:
             load_config(self.path)
-        self.assertIn('models = "specialist"', str(ctx.exception))
+        self.assertIn('models = "space4"', str(ctx.exception))
+
+    def test_format_is_flac_unless_set_to_wav(self):
+        self.assertEqual(load_config(self.path).format, "flac")
+        self.write('format = "wav"\n')
+        self.assertEqual(load_config(self.path).format, "wav")
+
+    def test_an_unknown_format_is_refused(self):
+        for text in ('format = "mp3"\n', "format = 1\n"):
+            with self.subTest(text=text):
+                self.write(text)
+                with self.assertRaises(ConfigError) as ctx:
+                    load_config(self.path)
+                self.assertIn("flac", str(ctx.exception))
 
     def test_parallel_is_read(self):
         self.write("parallel = 2\n")

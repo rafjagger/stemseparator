@@ -18,6 +18,10 @@ def _price_per_second(gpu: str) -> float | None:
     return GPU_PRICES_PER_SECOND[max(matches, key=len)]
 
 
+def format_usd(usd: float | None) -> str:
+    return "cost unknown" if usd is None else f"~${usd:.2f}"
+
+
 def cost_usd(gpu_seconds: float, gpu: str) -> float | None:
     price = _price_per_second(gpu)
     if price is None:

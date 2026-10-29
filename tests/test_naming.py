@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
 
-from stemseparator.naming import STEM_NAMES, sanitise_name, stem_file_name
+from stemseparator.naming import SPACE4_NAMES, STEM_NAMES, sanitise_name, stem_file_name
 from tests.stemdeck_reference import split_stem_name
 
 
@@ -13,6 +13,20 @@ class NamingTest(unittest.TestCase):
     def test_stem_file_names(self):
         self.assertEqual(stem_file_name("Archangel", 0), "Archangel - 1 - drums.wav")
         self.assertEqual(stem_file_name("Archangel", 3), "Archangel - 4 - vocals.wav")
+
+    def test_space4_names_are_spatial_jobs_in_bus_order(self):
+        self.assertEqual(SPACE4_NAMES, ("low", "tops", "music", "vocals"))
+
+    def test_stem_file_names_with_other_names(self):
+        self.assertEqual(stem_file_name("Archangel", 0, SPACE4_NAMES), "Archangel - 1 - low.wav")
+        self.assertEqual(stem_file_name("Archangel", 2, SPACE4_NAMES), "Archangel - 3 - music.wav")
+
+    def test_space4_files_make_one_set_in_bus_order(self):
+        splits = [split_stem_name(stem_file_name("Big Party", i, SPACE4_NAMES).removesuffix(".wav"))
+                  for i in range(4)]
+        self.assertEqual({prefix for prefix, _ in splits}, {"Big Party"})
+        self.assertEqual([suffix for _, suffix in splits],
+                         ["1 - low", "2 - tops", "3 - music", "4 - vocals"])
 
     def test_sanitise(self):
         cases = [

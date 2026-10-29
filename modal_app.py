@@ -15,7 +15,8 @@ weights = modal.Volume.from_name("stemseparator-weights", create_if_missing=True
 
 # torch 2.11.0: the newest torch that matches the last torchaudio release (2.11.0), which
 # demucs 4.0.0 pulls in; CUDA 13.0 wheels for Python 3.11, within Modal's CUDA 13.3 driver.
-# librosa: MSST's models/bs_roformer package imports it. build-essential: demucs needs diffq,
+# librosa: MSST's models/bs_roformer package imports it. PoPE-pytorch (+ einx, torch-einops-utils,
+# approved 2026-10-29): BS PolarFormer's use_pope; torch-einops-utils 0.1.37, not the 3-day-old 0.2.0. build-essential: demucs needs diffq,
 # which has no Python 3.11 wheel and compiles a Cython extension.
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -23,7 +24,8 @@ image = (
     .uv_pip_install("torch==2.11.0", "torchaudio==2.11.0", "numpy", "soundfile", "scipy",
                     "ml_collections", "omegaconf==2.2.3", "pyyaml", "einops==0.8.1",
                     "beartype==0.14.1", "rotary_embedding_torch==0.3.5", "tqdm", "librosa",
-                    "demucs==4.0.0")
+                    "demucs==4.0.0", "PoPE-pytorch==0.2.1", "einx[torch]==0.4.3",
+                    "torch-einops-utils==0.1.37")
     .run_commands(f"git clone {MSST_REPO} {MSST_DIR}",
                   f"git -C {MSST_DIR} checkout {MSST_COMMIT}")
     .add_local_python_source("stemseparator")
@@ -49,8 +51,8 @@ def _commit_new_weights(downloaded: bool) -> None:
         print(f"weights volume commit failed, continuing: {error!r}", flush=True)
 
 
-# memory=16384 fits both sets at the 20-min cap: the specialist holds the mix, one 4-stem result,
-# a float64 sum of the picked stems and the output set, no more than ensemble4's accumulator path.
+# memory=16384 fits every set at the 20-min cap: the largest holds the mix, one 6-stem result
+# (BS-RoFormer SW, ~2.5 GB), a float64 sum of the picked stems and the output set.
 @app.function(image=image, gpu=["A10", "L4"], volumes={WEIGHTS_DIR: weights}, timeout=1800,
               max_containers=4, scaledown_window=60, memory=16384)
 def separate(upload: bytes, model_set: str) -> dict:
@@ -71,12 +73,13 @@ def separate(upload: bytes, model_set: str) -> dict:
     _commit_new_weights(any(downloaded))
     device = torch.device("cuda")
     separated = assemble.separate_with_set(
-        chosen, mix, lambda name: runner.run_model(MODELS[name], mix, device))
+        chosen, mix, lambda name, audio: runner.run_model(MODELS[name], audio, device))
     stems = np.ascontiguousarray(np.transpose(separated, (0, 2, 1)))
     del separated
     residual = sumcheck.residual_db(mix.T, stems)
     return transport.encode_result(stems, time.monotonic() - started,
-                                   torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual)
+                                   torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual,
+                                   chosen.stem_names)
 
 
 @app.function(image=ping_image)

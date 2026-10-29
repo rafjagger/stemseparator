@@ -5,14 +5,18 @@
 Also imported inside the remote image: numpy, soundfile, stdlib and stemseparator only.
 """
 import io
+import re
 
 import numpy as np
 import soundfile as sf
 
+from stemseparator.naming import STEM_NAMES
 from stemseparator.separator import Separation, SeparatorError
 
 _STEM_COUNT = 4
 _FULL_SCALE = 1.0
+# Names become part of file names: lower-case words only, nothing a path could hide in.
+_STEM_NAME = re.compile(r"^[a-z]{1,16}$")
 
 
 def encode_upload(audio: np.ndarray, sample_rate: int) -> bytes:
@@ -31,7 +35,8 @@ def decode_upload(data: bytes) -> tuple[np.ndarray, int]:
 
 
 def encode_result(
-    stems: np.ndarray, gpu_seconds: float, gpu: str, sample_rate: int, residual_db: float
+    stems: np.ndarray, gpu_seconds: float, gpu: str, sample_rate: int, residual_db: float,
+    stem_names: tuple[str, ...] = STEM_NAMES,
 ) -> dict:
     little_endian = np.ascontiguousarray(stems, dtype="<f4")
     return {
@@ -41,6 +46,7 @@ def encode_result(
         "gpu": gpu,
         "sample_rate": int(sample_rate),
         "residual_db": float(residual_db),
+        "stem_names": list(stem_names),
     }
 
 
@@ -68,6 +74,18 @@ def _reject_non_finite(stems: np.ndarray) -> None:
                          transient=False)
 
 
+def _validated_stem_names(result: dict) -> tuple[str, ...]:
+    # A deploy from before named sets sends none; its sets were all drums/bass/other/vocals.
+    names = result.get("stem_names", list(STEM_NAMES))
+    if not isinstance(names, (list, tuple)) or len(names) != _STEM_COUNT:
+        raise _malformed(f"stem_names is not a list of {_STEM_COUNT} names")
+    if not all(isinstance(name, str) and _STEM_NAME.match(name) for name in names):
+        raise _malformed("stem_names holds a name that cannot be part of a file name")
+    if len(set(names)) != len(names):
+        raise _malformed("stem_names repeats a name")
+    return tuple(names)
+
+
 def decode_result(result: dict) -> Separation:
     shape = _validated_shape(result)
     data = result.get("stems")
@@ -85,6 +103,7 @@ def decode_result(result: dict) -> Separation:
     except (KeyError, TypeError, ValueError):
         raise _malformed("gpu_seconds, gpu or residual_db missing or invalid") from None
     # A view, not a copy: a 20-minute track is 1.7 GB. Nothing downstream writes into it.
+    stem_names = _validated_stem_names(result)
     stems = np.frombuffer(data, dtype="<f4").reshape(shape)
     _reject_non_finite(stems)
-    return Separation(stems, gpu_seconds, gpu, sample_rate, residual_db)
+    return Separation(stems, gpu_seconds, gpu, sample_rate, residual_db, stem_names)

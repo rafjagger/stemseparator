@@ -3,9 +3,10 @@
 import re
 import unittest
 
-from stemseparator.naming import STEM_NAMES
+from stemseparator.naming import SPACE4_NAMES, STEM_NAMES
 from stemseparator.remote.registry import (
-    DEFAULT_MODEL_SET, MODEL_SETS, MODELS, MSST_COMMIT, MSST_REPO, AveragedSet, SpecialistSet)
+    DEFAULT_MODEL_SET, MODEL_SETS, MODELS, MSST_COMMIT, MSST_REPO, AveragedSet, SpatialSet,
+    SpecialistSet)
 
 
 def _urls(spec):
@@ -45,8 +46,8 @@ class ManifestTest(unittest.TestCase):
 
 
 class ModelSetTest(unittest.TestCase):
-    def test_specialist_is_the_default_and_ensemble4_stays_selectable(self):
-        self.assertEqual(DEFAULT_MODEL_SET, "specialist")
+    def test_space4_is_the_default_and_specialist_and_ensemble4_stay_selectable(self):
+        self.assertEqual(DEFAULT_MODEL_SET, "space4")
         self.assertIsInstance(MODEL_SETS["specialist"], SpecialistSet)
         self.assertEqual(MODEL_SETS["ensemble4"],
                          AveragedSet(("scnet_masked_xl_ihf", "bs_roformer_ep17")))
@@ -63,6 +64,45 @@ class ModelSetTest(unittest.TestCase):
                                                   "drums": "scnet_xl_ihf",
                                                   "bass": "scnet_xl_ihf"})
         self.assertEqual(specialist.models, ("scnet_xl_ihf", "mel_roformer_kj_vocals"))
+
+    def test_space4_takes_drums_and_bass_from_scnet_vocals_from_kj_and_splits_the_drums(self):
+        self.assertEqual(MODEL_SETS["space4"],
+                         SpatialSet(rhythm="scnet_xl_ihf", vocals="mel_roformer_kj_vocals",
+                                    drumsep="mdx23c_drumsep_6stem", kick_stem="kick"))
+        self.assertEqual(MODEL_SETS["space4"].stem_names, SPACE4_NAMES)
+
+    def test_every_drum_model_checkpoint_is_hash_pinned(self):
+        for name, model_set in MODEL_SETS.items():
+            if isinstance(model_set, SpatialSet):
+                for checkpoint in MODELS[model_set.drumsep].checkpoints:
+                    self.assertIsNotNone(checkpoint.sha256, name)
+
+    def test_the_vocal_shootout_sets_swap_only_the_vocal_model_of_space4(self):
+        space4 = MODEL_SETS["space4"]
+        for name, vocals in (("space4polar", "bs_polarformer_vocals"),
+                             ("space4deux", "mel_roformer_deux_vocals")):
+            with self.subTest(name=name):
+                self.assertEqual(MODEL_SETS[name],
+                                 SpatialSet(rhythm=space4.rhythm, vocals=vocals,
+                                            drumsep=space4.drumsep, kick_stem=space4.kick_stem))
+
+    def test_the_new_vocal_models_are_hash_pinned(self):
+        for name in ("bs_polarformer_vocals", "mel_roformer_deux_vocals"):
+            for checkpoint in MODELS[name].checkpoints:
+                self.assertIsNotNone(checkpoint.sha256, name)
+
+    def test_sw4_maps_the_six_stem_model_to_four_with_other_as_the_rest(self):
+        sw4 = MODEL_SETS["sw4"]
+        self.assertEqual(dict(sw4.picks), {"drums": "bs_roformer_sw", "bass": "bs_roformer_sw",
+                                           "vocals": "bs_roformer_sw"})
+        self.assertEqual(sw4.residual, "other")
+        self.assertEqual(MODEL_SETS["space4sw"].rhythm, "bs_roformer_sw")
+
+    def test_third_party_files_are_pinned_to_a_revision(self):
+        for name, spec in MODELS.items():
+            for url in _urls(spec):
+                if "huggingface.co" in url or "MSST-WebUI" in url:
+                    self.assertRegex(url, r"/[0-9a-f]{40}/", f"{name}: {url}")
 
     def test_a_specialist_set_must_cover_every_stem_exactly_once(self):
         with self.assertRaises(ValueError):

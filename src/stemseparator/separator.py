@@ -6,14 +6,17 @@ from typing import Protocol
 
 import numpy as np
 
+from stemseparator.naming import STEM_NAMES
+
 
 @dataclass(frozen=True)
 class Separation:
-    stems: np.ndarray  # float32 (4, frames, channels), order STEM_NAMES, at sample_rate
+    stems: np.ndarray  # float32 (4, frames, channels), in stem_names order, at sample_rate
     gpu_seconds: float
     gpu: str  # e.g. "NVIDIA A10"; "" if unknown
     sample_rate: int
     residual_db: float  # mix the remote separated vs sum of stems, before any clamp
+    stem_names: tuple[str, ...] = STEM_NAMES  # the model set's names, in bus order
 
 
 class SeparatorError(Exception):

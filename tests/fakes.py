@@ -5,6 +5,7 @@ import threading
 import numpy as np
 
 from stemseparator import sumcheck
+from stemseparator.naming import STEM_NAMES
 from stemseparator.separator import Separation, SeparatorError
 
 
@@ -29,12 +30,13 @@ class FakeSeparator:
     """Weighted copies of the input, so the stems sum to the mix exactly."""
 
     def __init__(self, weights=(0.4, 0.3, 0.2, 0.1), fail_times=0, error=None,
-                 unavailable=None, gpu_seconds=10.0):
+                 unavailable=None, gpu_seconds=10.0, stem_names=STEM_NAMES):
         self.weights = weights
         self.fail_times = fail_times
         self.error = error if error is not None else SeparatorError("boom", transient=True)
         self.unavailable = unavailable
         self.gpu_seconds = gpu_seconds
+        self.stem_names = stem_names
         self.calls: list[tuple[int, str]] = []
         self._lock = threading.Lock()
 
@@ -52,4 +54,5 @@ class FakeSeparator:
             raise self.error
         mix = audio if sample_rate == 44100 else _resample_linear(audio, sample_rate, 44100)
         stems = np.stack([w * mix for w in self.weights]).astype(np.float32)
-        return Separation(stems, self.gpu_seconds, "FAKE", 44100, sumcheck.residual_db(mix, stems))
+        return Separation(stems, self.gpu_seconds, "FAKE", 44100, sumcheck.residual_db(mix, stems),
+                          self.stem_names)

@@ -144,6 +144,23 @@ class AudioIoTest(unittest.TestCase):
         self.assertEqual(raw[0, 1], -(2**31))
         self.assertAlmostEqual(raw[1, 0] / 2**31, 0.25, places=6)
 
+    def test_a_flac_stem_is_24_bit_and_round_trips_within_one_step(self):
+        path = self.dir / "out.flac"
+        audio = fakes.test_signal(0.2)
+        self.assertEqual(write_stem_24bit(path, audio, 44100), 0)
+        info = sf.info(path)
+        self.assertEqual((info.format, info.subtype, info.samplerate), ("FLAC", "PCM_24", 44100))
+        back, _ = sf.read(path, dtype="float32", always_2d=True)
+        self.assertLessEqual(float(np.max(np.abs(back - audio))), 2**-23)
+
+    def test_a_flac_stem_clamps_too(self):
+        path = self.dir / "hot.flac"
+        audio = np.array([[1.5, -1.5], [0.25, 0.25]], dtype=np.float32)
+        self.assertEqual(write_stem_24bit(path, audio, 44100), 2)
+        raw, _ = sf.read(path, dtype="int32", always_2d=True)
+        self.assertEqual(raw[0, 0], 2**31 - 256)
+        self.assertEqual(raw[0, 1], -(2**31))
+
     def test_max_24bit_constant(self):
         self.assertEqual(MAX_24BIT, 1.0 - 2.0**-23)
 
