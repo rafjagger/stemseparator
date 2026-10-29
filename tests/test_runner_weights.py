@@ -30,7 +30,7 @@ class WeightsTest(unittest.TestCase):
 
     def _spec(self, sha256=None):
         return ModelSpec("bs_roformer", self.config_url,
-                         (Checkpoint(self.checkpoint_file.as_uri(), sha256),))
+                         (Checkpoint(self.checkpoint_file.as_uri(), sha256),), "test", "test")
 
     def test_first_call_downloads_and_the_second_does_not(self):
         spec = self._spec()
@@ -51,7 +51,8 @@ class WeightsTest(unittest.TestCase):
         digest = hashlib.sha256(b"weights").hexdigest()
         with mock.patch("builtins.print") as printed:
             runner.download_missing(ModelSpec("bs_roformer", "configs/x.yaml",
-                                              (Checkpoint(self.checkpoint_file.as_uri(), digest),)))
+                                              (Checkpoint(self.checkpoint_file.as_uri(), digest),),
+                                              "test", "test"))
         printed.assert_not_called()
 
     def test_download_uses_a_timeout(self):
