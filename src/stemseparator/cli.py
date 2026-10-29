@@ -11,6 +11,7 @@ from stemseparator import cost, pipeline
 from stemseparator.audio_io import UndecodableError, read_track
 from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 from stemseparator.layout import plan_track
+from stemseparator.naming import STEM_NAMES
 from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
 from stemseparator.remote.registry import MODEL_SETS
@@ -88,6 +89,11 @@ def _print_failed(failed: list[TrackResult], out: TextIO) -> None:
         print(f"  {result.source}: {result.reason}", file=out)
 
 
+def _stem_names(model_set: str) -> tuple[str, ...]:
+    known = MODEL_SETS.get(model_set)
+    return known.stem_names if known is not None else STEM_NAMES
+
+
 def _dry_run_line(source: Path, config: Config, naming: Naming,
                   allow_long: bool) -> tuple[str, float, str | None]:
     """Returns (line, estimated usd, failure reason or None)."""
@@ -99,7 +105,8 @@ def _dry_run_line(source: Path, config: Config, naming: Naming,
     except UndecodableError as error:
         return f"{source} → failed: {error}", 0.0, str(error)
     artist, album, title = resolve_names(track, naming)
-    plan = plan_track(config.library, artist, album, title, source)
+    plan = plan_track(config.library, artist, album, title, source,
+                      stem_names=_stem_names(config.models))
     first_stem = plan.stem_paths[0].relative_to(config.library)
     estimate = cost.estimate_usd(track.seconds, config.models)
     detail = f"{format_duration(track.seconds)}, {format_cost(estimate)}"

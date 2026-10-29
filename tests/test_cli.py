@@ -59,6 +59,13 @@ class CliTest(unittest.TestCase):
         self.assertIn("~$", text)
         self.assertEqual(self._library_files(), [])
 
+    def test_dry_run_names_the_files_after_the_sets_stems(self):
+        source = self._source(seconds=3)
+        code = self._main("--dry-run", "--models", "space4", "--artist", "Ann", "--album", "Rec",
+                          "--title", "Tune", source)
+        self.assertEqual(code, 0, self.err.getvalue())
+        self.assertIn("Ann/Rec/Tune - 1 - low.wav", self.out.getvalue())
+
     def test_run_writes_sets_and_exits_0(self):
         a, b = self._source("a.flac"), self._source("b.flac")
         separator = FakeSeparator()
@@ -181,7 +188,7 @@ class CliTest(unittest.TestCase):
         code = cli.main([str(self._source())], separator_factory=lambda: separator,
                         config_path=self.config_path, out=self.out, err=self.err)
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertEqual([model_set for _, model_set in separator.calls], ["specialist"])
+        self.assertEqual([model_set for _, model_set in separator.calls], ["space4"])
 
     def test_unknown_models_flag_exits_2_and_names_the_sets(self):
         code = cli.main(["--models", "best", str(self._source())],
