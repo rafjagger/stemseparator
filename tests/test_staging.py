@@ -29,7 +29,7 @@ class StagingTest(unittest.TestCase):
         self.source = Path("song.flac")
 
     def _plan_for(self, title="Intro"):
-        return lambda: plan_track(self.library, "Artist", "Album", title, self.source)
+        return lambda: plan_track(self.library, Path("Artist/Album"), title, self.source)
 
     def test_commit_moves_five_files_and_cleans_staging(self):
         with StagedSet(self.library) as staged:
@@ -71,7 +71,7 @@ class StagingTest(unittest.TestCase):
 
         def plan_for(index):
             def plan():
-                result = plan_track(self.library, "Artist", "Album", "Intro", self.source)
+                result = plan_track(self.library, Path("Artist/Album"), "Intro", self.source)
                 planned[index].set()
                 # Without the lock the other worker plans now, before any rename happened.
                 planned[1 - index].wait(timeout=0.3)

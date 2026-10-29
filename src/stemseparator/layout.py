@@ -27,12 +27,13 @@ def _target_paths(album_dir: Path, title: str, suffix: str, stem_names: tuple[st
     return stems, album_dir / ORIGINALS_DIR / f"{title}{suffix}"
 
 
-def plan_track(library: Path, artist: str, album: str, title: str, source: Path,
+def plan_track(library: Path, folder: Path, title: str, source: Path,
                exists: Callable[[Path], bool] = Path.exists,
                stem_names: tuple[str, ...] = STEM_NAMES,
                extension: str = DEFAULT_OUTPUT_FORMAT) -> TrackPlan:
-    album_dir = (library / sanitise_name(artist, "Unknown Artist")
-                 / sanitise_name(album, "Unknown Album"))
+    # `folder` is relative to the library: the source folder's name, plus the path below the
+    # folder that was given on the command line.
+    album_dir = library.joinpath(*(sanitise_name(part, "_") for part in folder.parts))
     base_title = sanitise_name(title, "Untitled")
     for attempt in count(1):
         candidate = base_title if attempt == 1 else f"{base_title} ({attempt})"
@@ -42,6 +43,25 @@ def plan_track(library: Path, artist: str, album: str, title: str, source: Path,
         if not any(exists(path) for path in (*stems, original)):
             return TrackPlan(album_dir, candidate, stems, original)
     raise AssertionError("unreachable")
+
+
+def default_folder(source: Path) -> Path:
+    """A file given on its own goes into a folder named like its parent folder."""
+    return Path(source.resolve().parent.name or "stems")
+
+
+def output_folders(given: list[Path], sources: list[Path]) -> dict[Path, Path]:
+    """Per source, its folder in the library: mirrors the path below the folder it was found in."""
+    folders = {}
+    roots = [Path(path).resolve() for path in given if Path(path).is_dir()]
+    for source in sources:
+        inside = [root for root in roots if source.resolve().is_relative_to(root)]
+        if not inside:
+            folders[source] = default_folder(source)
+            continue
+        root = inside[0]
+        folders[source] = Path(root.name) / source.resolve().parent.relative_to(root)
+    return folders
 
 
 def is_inside(path: Path, folder: Path) -> bool:

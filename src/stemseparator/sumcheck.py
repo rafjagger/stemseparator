@@ -15,14 +15,17 @@ def _rms(signal: np.ndarray) -> float:
     return float(np.sqrt(total / signal.size)) if signal.size else 0.0
 
 
-def residual_db(mix: np.ndarray, stems: np.ndarray) -> float:
-    """20*log10(rms(mix - sum(stems)) / rms(mix)); -inf when exact or the mix is silent."""
-    mix_rms = _rms(mix)
+def residual_db(mix: np.ndarray, stems: np.ndarray, gain: float = 1.0) -> float:
+    """20*log10(rms(mix*gain - sum(stems)) / rms(mix*gain)); -inf when exact or the mix is silent.
+
+    `gain` is the common factor the stems were lowered by to avoid clipping.
+    """
+    mix_rms = _rms(mix) * gain
     if mix_rms == 0.0:
         return -np.inf
     # The only full-size float64 array: the stem sum, turned into the residual in place.
     residual = stems.sum(axis=0, dtype=np.float64)
-    np.subtract(mix, residual, out=residual)
+    np.subtract(np.multiply(mix, gain, dtype=np.float64), residual, out=residual)
     residual_rms = _rms(residual)
     if residual_rms == 0.0:
         return -np.inf

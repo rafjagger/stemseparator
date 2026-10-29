@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import Callable
 
 from stemseparator import cost
-from stemseparator.audio_io import Track, UndecodableError, read_seconds, read_track, \
-    write_stem_24bit
+from stemseparator.audio_io import Track, UndecodableError, lower_to_avoid_clipping, read_seconds, \
+    read_track, write_stem_24bit
 from stemseparator.compare import RUNS_FILE
 from stemseparator.layout import is_inside
 from stemseparator.naming import DEFAULT_OUTPUT_FORMAT, sanitise_name, stem_file_name
 from stemseparator.pipeline import (
-    MAX_SECONDS, OUTPUT_SAMPLE_RATE, Naming, resolve_names, result_problem, separate_with_retries)
+    MAX_SECONDS, OUTPUT_SAMPLE_RATE, Naming, result_problem, title_for, separate_with_retries)
 from stemseparator.separator import Separation, Separator, SeparatorError
 
 SHOOTOUT_DIR = "shootout"
@@ -42,7 +42,7 @@ class SetRun:
     gpu_seconds: float = 0.0
     gpu: str = ""
     residual_db: float = float("-inf")
-    clipped: int = 0
+    gain: float = 1.0
     stem_names: tuple[str, ...] = ()
 
 
@@ -80,23 +80,23 @@ def _check_same_track(runs: dict, source: Path, folder: Path) -> None:
 
 
 def _write_set(folder: Path, set_name: str, title: str, separation: Separation,
-               output_format: str) -> tuple[Path, int]:
+               output_format: str) -> tuple[Path, float]:
     partial = folder / f"{_PARTIAL_PREFIX}{set_name}"
     target = folder / set_name
     shutil.rmtree(partial, ignore_errors=True)
     partial.mkdir(parents=True)
     try:
-        clipped = sum(
+        lowered, gain = lower_to_avoid_clipping(separation.stems)
+        for index, stem in enumerate(lowered):
             write_stem_24bit(
                 partial / stem_file_name(title, index, separation.stem_names, output_format),
                 stem, OUTPUT_SAMPLE_RATE)
-            for index, stem in enumerate(separation.stems))
         shutil.rmtree(target, ignore_errors=True)
         partial.rename(target)
     except BaseException:
         shutil.rmtree(partial, ignore_errors=True)
         raise
-    return target, clipped
+    return target, gain
 
 
 def _run_set(set_name: str, track: Track, title: str, folder: Path, separator: Separator,
@@ -111,12 +111,12 @@ def _run_set(set_name: str, track: Track, title: str, folder: Path, separator: S
         return SetRun(set_name, ok=False, reason=problem, gpu_seconds=separation.gpu_seconds,
                       gpu=separation.gpu)
     try:
-        target, clipped = _write_set(folder, set_name, title, separation, output_format)
+        target, gain = _write_set(folder, set_name, title, separation, output_format)
     except OSError as error:
         return SetRun(set_name, ok=False, reason=f"could not write the set: {error}",
                       gpu_seconds=separation.gpu_seconds, gpu=separation.gpu)
     return SetRun(set_name, ok=True, folder=target, gpu_seconds=separation.gpu_seconds,
-                  gpu=separation.gpu, residual_db=separation.residual_db, clipped=clipped,
+                  gpu=separation.gpu, residual_db=separation.residual_db, gain=gain,
                   stem_names=separation.stem_names)
 
 
@@ -127,7 +127,7 @@ def _finite_or_none(value: float) -> float | None:
 def _entry(run: SetRun) -> dict:
     return {"gpu_seconds": run.gpu_seconds, "gpu": run.gpu,
             "cost_usd": cost.cost_usd(run.gpu_seconds, run.gpu),
-            "residual_db": _finite_or_none(run.residual_db), "clipped": run.clipped,
+            "residual_db": _finite_or_none(run.residual_db), "gain": run.gain,
             "stem_names": list(run.stem_names)}
 
 
@@ -156,7 +156,7 @@ def run_shootout(source: Path, set_names: list[str], *, library: Path, separator
         track = read_track(source)
     except UndecodableError as error:
         raise ShootoutError(f"{source}: {error}") from error
-    title = sanitise_name(resolve_names(track, naming)[2], "Untitled")
+    title = sanitise_name(title_for(source, naming), "Untitled")
     folder.mkdir(parents=True, exist_ok=True)
     entries = dict(runs.get("sets", {}))
     finished: dict[str, SetRun] = {}

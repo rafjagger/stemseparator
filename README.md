@@ -64,7 +64,7 @@ The command lives in the venv: run `source .venv/bin/activate` once per terminal
 
 ```
 stemseparator ~/Music/new/                    # every FLAC/WAV/AIFF in the folder and below
-stemseparator track.flac --artist X --album Y
+stemseparator track.flac --title "a098 Name"  # a single file; --title overrides the file name
 stemseparator --models ensemble4 track.flac   # another model set than the config's
 stemseparator --dry-run …                     # names and cost estimate, no upload
 ```
@@ -84,8 +84,12 @@ twice; a track that still fails leaves nothing in the library.
 - **Output:** always 44.1 kHz, 24-bit, as FLAC by default or WAV with `--format wav` (the models
   run at 44.1 kHz; a 48 kHz track comes back at 44.1 kHz). StemDeck reads both: FLAC is decoded
   into memory on load, so seeking is as instant as with WAV. Per track:
-  `<library>/<Artist>/<Album>/<Title> - 1 - low.flac` … `4 - vocals.flac` (`1 - drums` …
-  `4 - vocals` for the other sets), plus the untouched source under `originals/`.
+  `<library>/<source folder>/<file name> - 1 - low.flac` … `4 - vocals.flac` (`1 - drums` …
+  `4 - vocals` for the other sets), plus the untouched source under `originals/`. The folder is
+  named like the folder you gave (`stemseparator ~/Music/sets` with `~/Music/sets/house/a124 Foo.flac`
+  writes `<library>/sets/house/a124 Foo - 1 - low.flac` …); a file given on its own uses its parent
+  folder's name. The title is the file name without extension, so `aNNN` prefixes survive; tags
+  are not used for names, and there is no `--artist`/`--album`.
 - GPU seconds and cost per track are approximate: wall time on the GPU times Modal's list price;
   cold starts and idle time are not in it.
 - The `--dry-run` cost is a rough guess: it assumes 0.3 GPU seconds per second of audio and
@@ -108,8 +112,8 @@ are listed as unsupported.
 
 A track is **done** when either of these holds, checked before anything is uploaded:
 
-- the library holds its set under the name its tags give (artist, album, title; `--artist`,
-  `--album`, `--title` count), all four stems of the model set present, in FLAC or WAV, and the
+- the library holds its set under the folder and file name described above (`--title`
+  counts), all four stems of the model set present, in FLAC or WAV, and the
   stored original is the same file (a different file under the same name is *changed*, not done);
 - `<library>/.stemseparator-manifest.json` knows its content: source path, size, mtime, a sha256
   of the first and last MB, model set, date, output folder. A renamed or moved file is therefore
@@ -120,6 +124,28 @@ and replaces their set. Two files with the same content in one run are converted
 finished track enters the manifest at once, so an interrupted run (Ctrl-C, power cut) continues
 with the rest when started again; staging guarantees no half set is ever in the library. A
 manifest that cannot be read stops the run without changing anything.
+
+### No clipping
+
+A set never clips. Before writing, the highest absolute sample over all four stems is found; if it
+exceeds 24-bit full scale, all four stems are multiplied by the same factor so that the peak sits at
+-0.1 dBFS (the run prints e.g. `lowered by 0.6 dB to avoid clipping`). The stems still add up to
+the mix times that factor, so their balance is unchanged; StemDeck plays them as they are, with no
+tag and no compensation. A set within full scale is written unchanged. The factor is recorded as
+`gain` in the manifest entry. Writing refuses any sample beyond full scale instead of clamping.
+
+Sets written before this fix may have been clamped (about 100 samples in a 7-minute space4 track),
+and their manifest entries record neither a factor nor a clip count, so the manifest cannot tell
+which ones were hit. `--redo-clipped` converts again every done track whose entry has no `gain` or
+a `clipped` count above 0, replacing its set; with an old library that is all of them once, and
+after that only tracks converted after the fix are skipped. To redo only some, give the folder of
+those tracks: `stems-convert --redo-clipped <folder>`. Old runs printed `warning: N sample(s) clipped`
+for the affected tracks, so a saved log names them too.
+
+Sets made before the folder layout changed (`<Artist>/<Album>/<Title>`) stay where the manifest
+recorded them and count as done. `--redo` and `--redo-clipped` write the new set in the new place,
+then remove the old one: only the four stems and the original copy the manifest names, and the
+folders that are empty afterwards. `--dry-run` lists each such removal.
 
 The stem creator will move into A³ Canvas later; this is the stand-in until then.
 

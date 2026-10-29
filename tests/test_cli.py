@@ -52,21 +52,19 @@ class CliTest(unittest.TestCase):
 
     def test_dry_run_prints_names_and_estimate_and_never_builds_a_separator(self):
         source = self._source(seconds=252)
-        code = self._main("--dry-run", "--artist", "Ann", "--album", "Rec", "--title", "Tune",
-                          source)
+        code = self._main("--dry-run", "--title", "Tune", source)
         self.assertEqual(code, 0)
         text = self.out.getvalue()
-        self.assertIn("Ann/Rec/Tune - 1 - drums.flac", text)
+        self.assertIn("in/Tune - 1 - drums.flac", text)
         self.assertIn("4:12", text)
         self.assertIn("~$", text)
         self.assertEqual(self._library_files(), [])
 
     def test_dry_run_names_the_files_after_the_sets_stems(self):
         source = self._source(seconds=3)
-        code = self._main("--dry-run", "--models", "space4", "--artist", "Ann", "--album", "Rec",
-                          "--title", "Tune", source)
+        code = self._main("--dry-run", "--models", "space4", "--title", "Tune", source)
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertIn("Ann/Rec/Tune - 1 - low.flac", self.out.getvalue())
+        self.assertIn("in/Tune - 1 - low.flac", self.out.getvalue())
 
     def test_stems_are_flac_by_default(self):
         self._write_config(f'library = "{self.library}"\n')
@@ -303,13 +301,15 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, self.err.getvalue())
         self.assertIn("  warning: stems do not add up to the mix (residual -10.5 dB)",
                       self.out.getvalue())
-        self.assertNotIn("clipped", self.out.getvalue())
+        self.assertNotIn("lowered", self.out.getvalue())
 
-    def test_clipped_samples_print_a_warning(self):
+    def test_a_hot_set_prints_how_far_it_was_lowered(self):
         code = self._main(self._source(), separator=FakeSeparator(weights=(2.0, 0.0, 0.0, -1.0)))
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertRegex(self.out.getvalue(), r"\n  warning: \d+ sample\(s\) clipped\n")
-        self.assertNotIn("do not add up", self.out.getvalue())
+        self.assertRegex(self.out.getvalue(),
+                         r"\n  lowered by \d+\.\d dB to avoid clipping\n")
+        self.assertNotIn("clipped\n  warning", self.out.getvalue())
+        self.assertNotIn("sample(s) clipped", self.out.getvalue())
 
     def test_clean_result_prints_no_warning(self):
         self._main(self._source(), separator=FakeSeparator())
