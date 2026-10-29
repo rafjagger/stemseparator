@@ -15,7 +15,7 @@ import numpy as np
 from stemseparator import cost
 from stemseparator.audio_io import (
     AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Tags, Track, UndecodableError, read_seconds, read_track,
-    unsupported_format_message, write_stem_24bit)
+    lower_to_avoid_clipping, unsupported_format_message, write_stem_24bit)
 from stemseparator.layout import TrackPlan, is_inside, plan_track
 from stemseparator.naming import DEFAULT_OUTPUT_FORMAT
 from stemseparator.separator import Separation, Separator, SeparatorError
@@ -47,7 +47,7 @@ class TrackResult:
     gpu_seconds: float = 0.0
     gpu: str = ""
     residual_db: float = float("-inf")
-    clipped: int = 0
+    gain: float = 1.0  # the common factor the stems were lowered by; 1.0 = unchanged
 
 
 def names_from_tags(tags: Tags, path: Path, naming: Naming) -> tuple[str, str, str]:
@@ -87,17 +87,19 @@ def separate_with_retries(track: Track, separator: Separator, model_set: str,
     raise AssertionError("unreachable")
 
 
-def _write_stems(staged: StagedSet, stems: np.ndarray) -> int:
-    return sum(write_stem_24bit(path, stem, OUTPUT_SAMPLE_RATE)
-               for path, stem in zip(staged.stem_paths, stems))
+def _write_stems(staged: StagedSet, stems: np.ndarray) -> float:
+    lowered, gain = lower_to_avoid_clipping(stems)
+    for path, stem in zip(staged.stem_paths, lowered):
+        write_stem_24bit(path, stem, OUTPUT_SAMPLE_RATE)
+    return gain
 
 
 def _commit_set(source: Path, library: Path, separation: Separation,
                 names: tuple[str, str, str], output_format: str,
-                cancel: threading.Event | None, overwrite: bool) -> tuple[TrackPlan, int]:
+                cancel: threading.Event | None, overwrite: bool) -> tuple[TrackPlan, float]:
     artist, album, title = names
     with StagedSet(library, output_format) as staged:
-        clipped = _write_stems(staged, separation.stems)
+        gain = _write_stems(staged, separation.stems)
         shutil.copy2(source, staged.original_path)
         # Checked as late as possible: writing takes seconds, the rename does not.
         if _is_cancelled(cancel):
@@ -108,7 +110,7 @@ def _commit_set(source: Path, library: Path, separation: Separation,
                                                  exists=exists,
                                                  stem_names=separation.stem_names,
                                                  extension=output_format))
-    return plan, clipped
+    return plan, gain
 
 
 def refusal_before_decode(source: Path, library: Path, allow_long: bool) -> str | None:
@@ -164,14 +166,14 @@ def process_track(source: Path, *, library: Path, separator: Separator, model_se
     if problem is not None:
         return _failed(source, problem)
     try:
-        plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming),
+        plan, gain = _commit_set(source, library, separation, resolve_names(track, naming),
                                     output_format, cancel, overwrite)
     except _Abandoned:
         return _failed(source, ABANDONED_REASON)
     except Exception as error:  # the staged set is already gone; the batch continues
         return _failed(source, f"could not write the set: {error}")
     return TrackResult(source=source, ok=True, plan=plan, gpu_seconds=separation.gpu_seconds,
-                       gpu=separation.gpu, residual_db=separation.residual_db, clipped=clipped)
+                       gpu=separation.gpu, residual_db=separation.residual_db, gain=gain)
 
 
 def _process_track_safely(source: Path, **track_kwargs) -> TrackResult:

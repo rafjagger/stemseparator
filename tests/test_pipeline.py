@@ -270,12 +270,16 @@ class PipelineTest(unittest.TestCase):
         result = self._run(self._source(), FakeSeparator(weights=(0.4, 0.3, 0.2, 0.0)))
         self.assertAlmostEqual(result.residual_db, 20 * np.log10(0.1), delta=0.1)
 
-    def test_clipped_counted(self):
+    def test_a_hot_set_is_lowered_and_reports_its_gain(self):
         audio = fakes.test_signal(1.0)
         audio = (audio * (0.9 / np.max(np.abs(audio)))).astype(np.float32)
-        result = self._run(self._source(audio=audio), FakeSeparator(weights=(2, 0, 0, 0)))
+        result = self._run(self._source(audio=audio), FakeSeparator(weights=(2, -1, 0, 0)))
         self.assertTrue(result.ok, result.reason)
-        self.assertGreater(result.clipped, 0)
+        self.assertAlmostEqual(result.gain, 10 ** (-0.1 / 20) / 1.8, places=4)
+
+    def test_a_set_within_full_scale_has_gain_one(self):
+        result = self._run(self._source(), FakeSeparator())
+        self.assertEqual(result.gain, 1.0)
 
 
 if __name__ == "__main__":

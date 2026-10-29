@@ -24,6 +24,12 @@ class SumcheckTest(unittest.TestCase):
         stems = np.stack([0.9 * mix, 0 * mix, 0 * mix, 0 * mix])
         self.assertAlmostEqual(residual_db(mix, stems), -20.0, places=2)
 
+    def test_stems_lowered_by_a_gain_add_up_to_the_mix_times_that_gain(self):
+        mix = test_signal()
+        stems = np.stack([0.5 * mix, 0.25 * mix, 0.125 * mix, 0.125 * mix]) * np.float32(0.5)
+        self.assertGreater(residual_db(mix, stems), -7.0)
+        self.assertLess(residual_db(mix, stems, gain=0.5), -100.0)
+
     def test_long_signal_spanning_several_chunks(self):
         mix = test_signal(seconds=30.0)
         stems = np.stack([0.9 * mix, 0 * mix, 0 * mix, 0 * mix])

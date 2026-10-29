@@ -121,6 +121,23 @@ finished track enters the manifest at once, so an interrupted run (Ctrl-C, power
 with the rest when started again; staging guarantees no half set is ever in the library. A
 manifest that cannot be read stops the run without changing anything.
 
+### No clipping
+
+A set never clips. Before writing, the highest absolute sample over all four stems is found; if it
+exceeds 24-bit full scale, all four stems are multiplied by the same factor so that the peak sits at
+-0.1 dBFS (the run prints e.g. `lowered by 0.6 dB to avoid clipping`). The stems still add up to
+the mix times that factor, so their balance is unchanged; StemDeck plays them as they are, with no
+tag and no compensation. A set within full scale is written unchanged. The factor is recorded as
+`gain` in the manifest entry. Writing refuses any sample beyond full scale instead of clamping.
+
+Sets written before this fix may have been clamped (about 100 samples in a 7-minute space4 track),
+and their manifest entries record neither a factor nor a clip count, so the manifest cannot tell
+which ones were hit. `--redo-clipped` converts again every done track whose entry has no `gain` or
+a `clipped` count above 0, replacing its set; with an old library that is all of them once, and
+after that only tracks converted after the fix are skipped. To redo only some, give the folder of
+those tracks: `stems-convert --redo-clipped <folder>`. Old runs printed `warning: N sample(s) clipped`
+for the affected tracks, so a saved log names them too.
+
 The stem creator will move into A³ Canvas later; this is the stand-in until then.
 
 ## Shootout: comparing model sets

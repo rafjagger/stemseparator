@@ -16,6 +16,7 @@ REFUSED_AUDIO_SUFFIXES = (".mp3", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma
 ACCEPTED_HEADER_FORMATS = ("WAV", "WAVEX", "RF64", "FLAC", "AIFF")
 # Largest value PCM_24 can hold; +1.0 would wrap to negative full scale.
 MAX_24BIT = 1.0 - 2.0**-23
+HEADROOM_PEAK = 10.0 ** (-0.1 / 20.0)  # -0.1 dBFS, where a lowered set's peak sits
 
 
 @dataclass(frozen=True)
@@ -166,9 +167,31 @@ def read_track(path: Path) -> Track:
     return Track(path=path, audio=audio, sample_rate=rate, tags=read_tags(path))
 
 
-def write_stem_24bit(path: Path, audio: np.ndarray, sample_rate: int) -> int:
-    """Write a 24-bit WAV or FLAC, by the path's suffix; returns how many samples were clipped."""
-    clipped = int(np.count_nonzero((audio > MAX_24BIT) | (audio < -1.0)))
-    # libsndfile does not clip float to int, it wraps.
-    sf.write(path, np.clip(audio, -1.0, MAX_24BIT), sample_rate, subtype="PCM_24")
-    return clipped
+def peak_of(stems: np.ndarray) -> float:
+    return float(np.max(np.abs(stems))) if stems.size else 0.0
+
+
+def lower_to_avoid_clipping(stems: np.ndarray) -> tuple[np.ndarray, float]:
+    """All stems of a set times one common factor, so that none exceeds full scale.
+
+    A set whose peak is within full scale comes back unchanged with factor 1. Otherwise the peak
+    lands at HEADROOM_PEAK. One factor for every stem keeps their balance, and they still add up
+    to the mix times that factor.
+    """
+    peak = peak_of(stems)
+    if peak <= MAX_24BIT:
+        return stems, 1.0
+    factor = HEADROOM_PEAK / peak
+    lowered = (stems * np.float32(factor)).astype(np.float32, copy=False)
+    # Never clamp silently: a float32 rounding slip must fail here, not turn into wrapped audio.
+    if not peak_of(lowered) <= MAX_24BIT:
+        raise ValueError("stems still exceed full scale after lowering")
+    return lowered, factor
+
+
+def write_stem_24bit(path: Path, audio: np.ndarray, sample_rate: int) -> None:
+    """Write a 24-bit WAV or FLAC, by the path's suffix. Refuses audio beyond full scale."""
+    # libsndfile does not clip float to int, it wraps; so this is a hard stop, not a clamp.
+    if not (audio.size == 0 or (float(np.max(audio)) <= MAX_24BIT and float(np.min(audio)) >= -1.0)):
+        raise ValueError("audio exceeds full scale; lower_to_avoid_clipping comes first")
+    sf.write(path, audio, sample_rate, subtype="PCM_24")

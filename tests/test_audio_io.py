@@ -14,6 +14,7 @@ from stemseparator.audio_io import (
     read_seconds,
     read_track,
     unsupported_format_message,
+    lower_to_avoid_clipping,
     write_stem_24bit,
 )
 from tests import fakes
@@ -134,32 +135,49 @@ class AudioIoTest(unittest.TestCase):
         tags = read_track(self._write("n.wav", fakes.test_signal(0.1))).tags
         self.assertEqual((tags.title, tags.artist, tags.album, tags.albumartist), ("", "", "", ""))
 
-    def test_clamp_not_wrap(self):
+    def test_audio_beyond_full_scale_is_refused_not_clamped_or_wrapped(self):
         path = self.dir / "out.wav"
         audio = np.array([[1.5, -1.5], [0.25, 0.25]], dtype=np.float32)
-        self.assertEqual(write_stem_24bit(path, audio, 44100), 2)
-        self.assertEqual(sf.info(path).subtype, "PCM_24")
+        with self.assertRaises(ValueError):
+            write_stem_24bit(path, audio, 44100)
+        self.assertFalse(path.exists())
+
+    def test_nan_is_refused(self):
+        audio = np.array([[np.nan, 0.0]], dtype=np.float32)
+        with self.assertRaises(ValueError):
+            write_stem_24bit(self.dir / "nan.wav", audio, 44100)
+
+    def test_full_scale_itself_is_written_exactly(self):
+        path = self.dir / "edge.wav"
+        audio = np.array([[MAX_24BIT, -1.0]], dtype=np.float32)
+        write_stem_24bit(path, audio, 44100)
         raw, _ = sf.read(path, dtype="int32", always_2d=True)
         self.assertEqual(raw[0, 0], 2**31 - 256)
         self.assertEqual(raw[0, 1], -(2**31))
-        self.assertAlmostEqual(raw[1, 0] / 2**31, 0.25, places=6)
+
+    def test_a_set_within_full_scale_is_not_touched(self):
+        stems = np.full((4, 10, 2), 0.5, dtype=np.float32)
+        lowered, factor = lower_to_avoid_clipping(stems)
+        self.assertEqual(factor, 1.0)
+        self.assertIs(lowered, stems)
+
+    def test_a_hot_set_is_lowered_by_one_factor_to_minus_point_one_dbfs(self):
+        stems = np.zeros((4, 10, 2), dtype=np.float32)
+        stems[0, 3, 0] = 1.6
+        stems[1, 5, 1] = -0.8
+        lowered, factor = lower_to_avoid_clipping(stems)
+        self.assertAlmostEqual(20 * np.log10(float(np.max(np.abs(lowered)))), -0.1, places=4)
+        np.testing.assert_allclose(lowered, stems * factor, rtol=1e-6)
+        self.assertLessEqual(float(np.max(np.abs(lowered))), MAX_24BIT)
 
     def test_a_flac_stem_is_24_bit_and_round_trips_within_one_step(self):
         path = self.dir / "out.flac"
         audio = fakes.test_signal(0.2)
-        self.assertEqual(write_stem_24bit(path, audio, 44100), 0)
+        write_stem_24bit(path, audio, 44100)
         info = sf.info(path)
         self.assertEqual((info.format, info.subtype, info.samplerate), ("FLAC", "PCM_24", 44100))
         back, _ = sf.read(path, dtype="float32", always_2d=True)
         self.assertLessEqual(float(np.max(np.abs(back - audio))), 2**-23)
-
-    def test_a_flac_stem_clamps_too(self):
-        path = self.dir / "hot.flac"
-        audio = np.array([[1.5, -1.5], [0.25, 0.25]], dtype=np.float32)
-        self.assertEqual(write_stem_24bit(path, audio, 44100), 2)
-        raw, _ = sf.read(path, dtype="int32", always_2d=True)
-        self.assertEqual(raw[0, 0], 2**31 - 256)
-        self.assertEqual(raw[0, 1], -(2**31))
 
     def test_max_24bit_constant(self):
         self.assertEqual(MAX_24BIT, 1.0 - 2.0**-23)

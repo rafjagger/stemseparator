@@ -8,6 +8,7 @@ of each frequency band of the mix a stem carries (a vocals stem with sub-bass is
 sets: how different the same stem is, and how closely it correlates.
 """
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,8 +113,13 @@ def _fit(signal: np.ndarray, frames: int) -> np.ndarray:
     return np.pad(signal, (0, frames - len(signal)))
 
 
-def measure_set(mix: np.ndarray, stems: dict[str, Path]) -> SetMeasures:
-    """One stem in memory at a time; the mix is mono at RATE."""
+def measure_set(mix: np.ndarray, stems: dict[str, Path], gain: float = 1.0) -> SetMeasures:
+    """One stem in memory at a time; the mix is mono at RATE.
+
+    `gain` is the factor the set was lowered by to avoid clipping: the stems add up to mix*gain.
+    """
+    if gain != 1.0:
+        mix = mix * gain
     mix_power = _power(mix)
     mix_bands = band_energy(mix)
     remainder = mix.astype(np.float64)
@@ -222,10 +228,17 @@ def _number(value, digits: int) -> str:
     return "–" if value is None else f"{value:.{digits}f}"
 
 
+def _lowered_db(gain) -> str:
+    # Runs from before the fix recorded clipped samples instead of a gain.
+    if gain is None:
+        return "–"
+    return f"{20 * math.log10(gain):.1f}"
+
+
 def _runs_table(sets: dict[str, dict[str, Path]], runs: dict,
                 measures: dict[str, SetMeasures]) -> list[str]:
     lines = ["| set | stems | GPU s | GPU | cost | residual dB (remote) | residual dB (files) | "
-             "clipped |", "|---|---|---|---|---|---|---|---|"]
+             "lowered dB |", "|---|---|---|---|---|---|---|---|"]
     for name, stems in sets.items():
         run = runs.get("sets", {}).get(name, {})
         cost = run.get("cost_usd")
@@ -233,7 +246,7 @@ def _runs_table(sets: dict[str, dict[str, Path]], runs: dict,
             f"| {name} | {' / '.join(stems)} | {_number(run.get('gpu_seconds'), 0)} | "
             f"{run.get('gpu', '–')} | {format_usd(cost) if 'cost_usd' in run else '–'} | "
             f"{_number(run.get('residual_db'), 1) if run else '–'} | "
-            f"{measures[name].residual_db:.1f} | {run.get('clipped', '–')} |")
+            f"{measures[name].residual_db:.1f} | {_lowered_db(run.get('gain'))} |")
     return lines
 
 
@@ -284,7 +297,8 @@ def run_compare(shootout: Path, *, mix: Path | None = None, at_seconds: float | 
         raise CompareError(f"no {RUNS_FILE} in {shootout}: give the mix with --mix")
     sets = _set_folders(shootout, runs)
     mix_mono = read_mono(mix)
-    measures = {name: measure_set(mix_mono, stems) for name, stems in sets.items()}
+    measures = {name: measure_set(mix_mono, stems, runs.get('sets', {}).get(name, {}).get('gain', 1.0))
+                for name, stems in sets.items()}
     start = loudest_window(mix_mono, RATE, EXCERPT_SECONDS) if at_seconds is None \
         else int(at_seconds * RATE)
     excerpts = write_excerpts(sets, start / RATE, shootout / EXCERPTS_DIR)

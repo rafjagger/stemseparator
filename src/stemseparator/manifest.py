@@ -52,6 +52,10 @@ class Entry:
     date: str
     output_folder: str  # relative to the library
     title: str
+    # Entries from before the no-clipping fix have neither: those sets were clamped if they were
+    # hot, and nothing recorded whether they were.
+    gain: float | None = None  # the common factor the stems were lowered by; 1.0 = unchanged
+    clipped: int | None = None  # samples that were clamped when the set was written
 
     @property
     def fingerprint(self) -> Fingerprint:
@@ -82,16 +86,25 @@ class Manifest:
         return [e for e in self._entries
                 if e.fingerprint.same_content(fp) and e.model_set == model_set]
 
+    def may_have_clipped(self, fp: Fingerprint, model_set: str) -> bool:
+        """True unless the set's entry says it was written without clamping."""
+        entries = self.with_content(fp, model_set)
+        if not entries:
+            return True
+        latest = entries[-1]
+        return latest.gain is None or (latest.clipped or 0) > 0
+
     def with_source(self, source: Path, model_set: str) -> list[Entry]:
         key = str(source.resolve())
         return [e for e in self._entries if e.source == key and e.model_set == model_set]
 
     def record(self, source: Path, fp: Fingerprint, model_set: str, output_folder: str,
-               title: str) -> None:
+               title: str, gain: float | None = None) -> None:
         entry = Entry(source=str(source.resolve()), size=fp.size, mtime=source.stat().st_mtime,
                       sha256=fp.sha256, model_set=model_set,
                       date=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                      output_folder=output_folder, title=title)
+                      output_folder=output_folder, title=title, gain=gain,
+                      clipped=None if gain is None else 0)
         kept = [e for e in self._entries
                 if not (e.fingerprint.same_content(fp) and e.model_set == model_set)]
         self._entries = [*kept, entry]

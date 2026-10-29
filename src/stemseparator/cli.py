@@ -3,6 +3,7 @@
 """The stemseparator command line: arguments, dry-run, preflight, reporting, exit codes."""
 
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Callable, TextIO
@@ -61,6 +62,9 @@ def _build_parser(err: TextIO) -> argparse.ArgumentParser:
     parser.add_argument("--long", action="store_true", help="allow tracks longer than 20 min")
     parser.add_argument("--redo", action="store_true",
                         help="separate tracks the library already holds again, replacing their sets")
+    parser.add_argument("--redo-clipped", action="store_true",
+                        help="separate again only the tracks whose set may have been clamped: "
+                             "clipped samples recorded, or written before the factor was recorded")
     parser.add_argument("--models", metavar="SET",
                         help=f"model set, overrides the config ({', '.join(MODEL_SETS)})")
     parser.add_argument("--format", choices=OUTPUT_FORMATS,
@@ -154,15 +158,24 @@ def _skip_line(item: Item) -> str:
     return f"{item.source} → skipped: already done ({item.location})"
 
 
-def _runnable(items: list[Item], redo: bool) -> list[Item]:
+def _runnable(items: list[Item], redo: bool,
+              redo_clipped: Callable[[Item], bool] = lambda item: False) -> list[Item]:
     wanted = (PENDING, CHANGED, DONE) if redo else (PENDING, CHANGED)
-    return [item for item in items if item.state in wanted]
+    return [item for item in items
+            if item.state in wanted or (item.state == DONE and redo_clipped(item))]
+
+
+def _clip_redo_test(args, manifest: Manifest, model_set: str) -> Callable[[Item], bool]:
+    if not args.redo_clipped:
+        return lambda item: False
+    return lambda item: manifest.may_have_clipped(item.fingerprint, model_set)
 
 
 def _dry_run(items: list[Item], refused: list[TrackResult], config: Config, naming: Naming,
-             allow_long: bool, redo: bool, out: TextIO) -> int:
+             allow_long: bool, redo: bool, redo_clipped: Callable[[Item], bool],
+             out: TextIO) -> int:
     failed = list(refused)
-    runnable = _runnable(items, redo)
+    runnable = _runnable(items, redo, redo_clipped)
     total = 0.0
     for item in items:
         if item.state == UNSUPPORTED:
@@ -227,9 +240,13 @@ def _warnings(result: TrackResult) -> list[str]:
     if result.residual_db > SUM_WARN_DB:
         lines.append(f"warning: stems do not add up to the mix "
                      f"(residual {result.residual_db:.1f} dB)")
-    if result.clipped > 0:
-        lines.append(f"warning: {result.clipped} sample(s) clipped")
     return lines
+
+
+def _lowered_note(result: TrackResult) -> list[str]:
+    if result.gain >= 1.0:
+        return []
+    return [f"lowered by {-20 * math.log10(result.gain):.1f} dB to avoid clipping"]
 
 
 def _make_reporter(total: int, out: TextIO,
@@ -247,7 +264,7 @@ def _make_reporter(total: int, out: TextIO,
             return
         print(f"{prefix} {result.plan.title}: done "
               f"(GPU {result.gpu_seconds:.0f} s, {_result_cost(result)})", file=out)
-        for line in _warnings(result):
+        for line in [*_lowered_note(result), *_warnings(result)]:
             print(f"  {line}", file=out)
 
     return report
@@ -297,7 +314,8 @@ def _remember(manifest: Manifest, items: list[Item], config: Config) -> Callable
 
     def record(result: TrackResult) -> None:
         manifest.record(result.source, fingerprints[result.source], config.models,
-                        str(result.plan.album_dir.relative_to(config.library)), result.plan.title)
+                        str(result.plan.album_dir.relative_to(config.library)), result.plan.title,
+                        gain=result.gain)
     return record
 
 
@@ -311,8 +329,9 @@ def _adopt_untracked(manifest: Manifest, items: list[Item], config: Config) -> N
                         location.name)
 
 
-def _real_run(items, refused, manifest, config, naming, redo, allow_long, factory, out, err) -> int:
-    runnable = _runnable(items, redo)
+def _real_run(items, refused, manifest, config, naming, redo, redo_clipped, allow_long, factory,
+              out, err) -> int:
+    runnable = _runnable(items, redo, redo_clipped)
     skipped = len([item for item in items if item.state in (DONE, DUPLICATE)]) - len(
         [item for item in runnable if item.state == DONE])
     if skipped:
@@ -497,8 +516,10 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
     try:
         items = _triage(sources, config, naming, manifest, args.long)
         if args.dry_run:
-            return _dry_run(items, refused, config, naming, args.long, args.redo, out)
-        return _real_run(items, refused, manifest, config, naming, args.redo, args.long,
+            return _dry_run(items, refused, config, naming, args.long, args.redo,
+                            _clip_redo_test(args, manifest, config.models), out)
+        return _real_run(items, refused, manifest, config, naming, args.redo,
+                         _clip_redo_test(args, manifest, config.models), args.long,
                          separator_factory or _default_separator_factory, out, err)
     except KeyboardInterrupt:
         print(INTERRUPTED_LINE, file=err)

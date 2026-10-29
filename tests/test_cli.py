@@ -303,13 +303,15 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, self.err.getvalue())
         self.assertIn("  warning: stems do not add up to the mix (residual -10.5 dB)",
                       self.out.getvalue())
-        self.assertNotIn("clipped", self.out.getvalue())
+        self.assertNotIn("lowered", self.out.getvalue())
 
-    def test_clipped_samples_print_a_warning(self):
+    def test_a_hot_set_prints_how_far_it_was_lowered(self):
         code = self._main(self._source(), separator=FakeSeparator(weights=(2.0, 0.0, 0.0, -1.0)))
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertRegex(self.out.getvalue(), r"\n  warning: \d+ sample\(s\) clipped\n")
-        self.assertNotIn("do not add up", self.out.getvalue())
+        self.assertRegex(self.out.getvalue(),
+                         r"\n  lowered by \d+\.\d dB to avoid clipping\n")
+        self.assertNotIn("clipped\n  warning", self.out.getvalue())
+        self.assertNotIn("sample(s) clipped", self.out.getvalue())
 
     def test_clean_result_prints_no_warning(self):
         self._main(self._source(), separator=FakeSeparator())
