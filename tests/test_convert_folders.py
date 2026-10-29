@@ -216,7 +216,7 @@ class DoneCheckTest(ConvertFoldersTest):
         self.assertEqual(entry["size"], source.stat().st_size)
         self.assertEqual(entry["sha256"], fingerprint(source).sha256)
         self.assertEqual(entry["model_set"], "specialist")
-        self.assertEqual(entry["output_folder"], "Ann/Rec")
+        self.assertEqual(entry["output_folder"], "music")
         for key in ("mtime", "date", "title"):
             self.assertIn(key, entry)
 
@@ -231,7 +231,7 @@ class StatusAndDryRunTest(ConvertFoldersTest):
         code = self._status()
         text = self.out.getvalue()
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertRegex(text, r"done +\S*done\.flac  → Ann/Rec/Done")
+        self.assertRegex(text, r"done +\S*done\.flac  → music/done")
         self.assertRegex(text, r"pending +\S*new\.flac")
         self.assertRegex(text, r"unsupported +\S*x\.mp3")
         last = text.strip().splitlines()[-1]
@@ -250,8 +250,8 @@ class StatusAndDryRunTest(ConvertFoldersTest):
         code = self._run("--dry-run", self.music)
         text = self.out.getvalue()
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertIn("skipped: already done (Ann/Rec/Done)", text)
-        self.assertIn("Ann/Rec/New - 1 - ", text)
+        self.assertIn("skipped: already done (music/done)", text)
+        self.assertIn("music/new - 1 - ", text)
         self.assertIn("1 track(s), estimated", text)
         self.assertIn("1 already done", text)
         self.assertEqual(len(self._stem_files()), 4)
@@ -269,7 +269,7 @@ class ResumeTest(ConvertFoldersTest):
             self._track(f"{name}.flac", title=name.upper())
         code, _ = self._convert(separator=Interrupting(on_call=2))
         self.assertEqual(code, 130)
-        self.assertEqual([e["title"] for e in self._manifest()], ["A"])
+        self.assertEqual([e["title"] for e in self._manifest()], ["a"])
         code, separator = self._convert()
         self.assertEqual(code, 0, self.err.getvalue())
         self.assertEqual(len(separator.calls), 2)

@@ -12,11 +12,12 @@ from stemseparator import batch_plan, compare, cost, pipeline, shootout
 from stemseparator.audio_io import UndecodableError, read_track
 from stemseparator.batch_plan import CHANGED, DONE, DUPLICATE, PENDING, UNSUPPORTED, Item
 from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
-from stemseparator.layout import plan_track
-from stemseparator.manifest import Manifest, ManifestError
+from stemseparator.layout import output_folders, plan_track
+from stemseparator.manifest import Entry, Manifest, ManifestError
+from stemseparator.replaced import location_of, remove_replaced_set
 from stemseparator.naming import OUTPUT_FORMATS, STEM_NAMES
 from stemseparator.pipeline import (
-    SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
+    SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, run_batch, title_for)
 from stemseparator.remote.registry import MODEL_SETS
 from stemseparator.separator import Separator, SeparatorUnavailable
 from stemseparator.staging import StagedSet, StagingError
@@ -53,8 +54,6 @@ def _build_parser(err: TextIO) -> argparse.ArgumentParser:
     parser = _Parser(err, prog="stemseparator",
                      description="Separate tracks into four-stem sets for StemDeck.")
     parser.add_argument("paths", nargs="*", type=Path, help="audio files or folders")
-    parser.add_argument("--artist")
-    parser.add_argument("--album")
     parser.add_argument("--title", help="only valid with a single input track")
     parser.add_argument("--library", type=Path, help="overrides the config's library")
     parser.add_argument("--dry-run", action="store_true",
@@ -92,8 +91,6 @@ def _build_status_parser(err: TextIO) -> argparse.ArgumentParser:
                      description="List which tracks in the folders are converted, pending, "
                                  "changed or unsupported. Uploads nothing.")
     parser.add_argument("paths", nargs="+", type=Path, help="audio files or folders")
-    parser.add_argument("--artist")
-    parser.add_argument("--album")
     parser.add_argument("--library", type=Path, help="overrides the config's library")
     parser.add_argument("--models", metavar="SET", help="model set, overrides the config")
     parser.add_argument("--format", choices=OUTPUT_FORMATS, help=argparse.SUPPRESS)
@@ -133,7 +130,7 @@ def _stem_names(model_set: str) -> tuple[str, ...]:
     return known.stem_names if known is not None else STEM_NAMES
 
 
-def _dry_run_line(source: Path, config: Config, naming: Naming,
+def _dry_run_line(source: Path, folder: Path, config: Config, naming: Naming,
                   allow_long: bool) -> tuple[str, float, str | None]:
     """Returns (line, estimated usd, failure reason or None)."""
     refusal = pipeline.refusal_before_decode(source, config.library, allow_long)
@@ -143,13 +140,24 @@ def _dry_run_line(source: Path, config: Config, naming: Naming,
         track = read_track(source)
     except UndecodableError as error:
         return f"{source} → failed: {error}", 0.0, str(error)
-    artist, album, title = resolve_names(track, naming)
-    plan = plan_track(config.library, artist, album, title, source,
+    plan = plan_track(config.library, folder, title_for(source, naming), source,
                       stem_names=_stem_names(config.models), extension=config.format)
     first_stem = plan.stem_paths[0].relative_to(config.library)
     estimate = cost.estimate_usd(track.seconds, config.models)
     detail = f"{format_duration(track.seconds)}, {format_cost(estimate)}"
     return f"{source} → {first_stem} … ({detail})", estimate, None
+
+
+def _replaces_notes(item: Item, folder: Path, config: Config, naming: Naming,
+                    manifest: Manifest) -> list[str]:
+    """An old set in another place is removed once the new one stands."""
+    plan = plan_track(config.library, folder, title_for(item.source, naming), item.source,
+                      exists=lambda path: False, stem_names=_stem_names(config.models),
+                      extension=config.format)
+    new = plan.album_dir.relative_to(config.library) / plan.title
+    return [f"moves the set: removes the old one at {location_of(entry)} after writing it"
+            for entry in manifest.with_content(item.fingerprint, config.models)
+            if item.state == DONE and location_of(entry) != new]
 
 
 def _skip_line(item: Item) -> str:
@@ -173,7 +181,7 @@ def _clip_redo_test(args, manifest: Manifest, model_set: str) -> Callable[[Item]
 
 def _dry_run(items: list[Item], refused: list[TrackResult], config: Config, naming: Naming,
              allow_long: bool, redo: bool, redo_clipped: Callable[[Item], bool],
-             out: TextIO) -> int:
+             folders: dict[Path, Path], manifest: Manifest, out: TextIO) -> int:
     failed = list(refused)
     runnable = _runnable(items, redo, redo_clipped)
     total = 0.0
@@ -184,8 +192,11 @@ def _dry_run(items: list[Item], refused: list[TrackResult], config: Config, nami
         elif item not in runnable:
             print(_skip_line(item), file=out)
     for item in runnable:
-        line, estimate, reason = _dry_run_line(item.source, config, naming, allow_long)
+        line, estimate, reason = _dry_run_line(item.source, folders[item.source], config, naming,
+                                               allow_long)
         print(line + (" [changed since done]" if item.state == CHANGED else ""), file=out)
+        for note in _replaces_notes(item, folders[item.source], config, naming, manifest):
+            print(f"  {note}", file=out)
         total += estimate
         if reason is not None:
             failed.append(TrackResult(source=item.source, ok=False, reason=reason))
@@ -313,10 +324,22 @@ def _remember(manifest: Manifest, items: list[Item], config: Config) -> Callable
     fingerprints = {item.source: item.fingerprint for item in items}
 
     def record(result: TrackResult) -> None:
+        old = manifest.with_content(fingerprints[result.source], config.models)
         manifest.record(result.source, fingerprints[result.source], config.models,
                         str(result.plan.album_dir.relative_to(config.library)), result.plan.title,
                         gain=result.gain)
+        _remove_replaced(manifest, old, result, config)
     return record
+
+
+def _remove_replaced(manifest: Manifest, old: list[Entry], result: TrackResult,
+                     config: Config) -> None:
+    new = result.plan.album_dir.relative_to(config.library) / result.plan.title
+    for entry in old:
+        # Another source may still stand at that place; then it is not ours to take away.
+        shared = any(location_of(other) == location_of(entry) for other in manifest.entries)
+        if location_of(entry) != new and not shared:
+            remove_replaced_set(config.library, entry, _stem_names(config.models))
 
 
 def _adopt_untracked(manifest: Manifest, items: list[Item], config: Config) -> None:
@@ -329,8 +352,8 @@ def _adopt_untracked(manifest: Manifest, items: list[Item], config: Config) -> N
                         location.name)
 
 
-def _real_run(items, refused, manifest, config, naming, redo, redo_clipped, allow_long, factory,
-              out, err) -> int:
+def _real_run(items, refused, manifest, config, naming, redo, redo_clipped, folders, allow_long,
+              factory, out, err) -> int:
     runnable = _runnable(items, redo, redo_clipped)
     skipped = len([item for item in items if item.state in (DONE, DUPLICATE)]) - len(
         [item for item in runnable if item.state == DONE])
@@ -358,6 +381,7 @@ def _real_run(items, refused, manifest, config, naming, redo, redo_clipped, allo
     summary = run_batch(sources, parallel=config.parallel, report=report,
                         on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
                         overwrite=frozenset(item.source for item in runnable if item.state == DONE),
+                        folders=folders,
                         library=config.library, separator=separator, model_set=config.models,
                         naming=naming, allow_long=allow_long, output_format=config.format)
     _print_summary(summary, refused, out)
@@ -493,7 +517,7 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
         sets = _shootout_sets(args, known_sets) if args.shootout else []
     except ConfigError as error:
         return _usage(str(error), err)
-    naming = Naming(args.artist, args.album, args.title)
+    naming = Naming(args.title)
     if args.shootout:
         if args.dry_run:
             return _shootout_dry_run(args.shootout, sets, out)
@@ -514,21 +538,22 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
     except ManifestError as error:
         return _usage(str(error), err)
     try:
-        items = _triage(sources, config, naming, manifest, args.long)
+        folders = output_folders(args.paths, sources)
+        items = _triage(sources, folders, config, naming, manifest, args.long)
         if args.dry_run:
             return _dry_run(items, refused, config, naming, args.long, args.redo,
-                            _clip_redo_test(args, manifest, config.models), out)
+                            _clip_redo_test(args, manifest, config.models), folders, manifest, out)
         return _real_run(items, refused, manifest, config, naming, args.redo,
-                         _clip_redo_test(args, manifest, config.models), args.long,
+                         _clip_redo_test(args, manifest, config.models), folders, args.long,
                          separator_factory or _default_separator_factory, out, err)
     except KeyboardInterrupt:
         print(INTERRUPTED_LINE, file=err)
         return EXIT_INTERRUPTED
 
 
-def _triage(sources: list[Path], config: Config, naming: Naming, manifest: Manifest,
+def _triage(sources: list[Path], folders: dict[Path, Path], config: Config, naming: Naming, manifest: Manifest,
             allow_long: bool) -> list[Item]:
-    return batch_plan.classify(sources, library=config.library, model_set=config.models,
+    return batch_plan.classify(sources, library=config.library, folders=folders, model_set=config.models,
                                stem_names=_stem_names(config.models), naming=naming,
                                manifest=manifest, allow_long=allow_long)
 
@@ -547,7 +572,8 @@ def status_main(argv: list[str], config_path: Path, known_sets: frozenset[str] |
         manifest = Manifest(config.library)
     except ManifestError as error:
         return _usage(str(error), err)
-    items = _triage(sources, config, Naming(args.artist, args.album), manifest, args.long)
+    items = _triage(sources, output_folders(args.paths, sources), config, Naming(), manifest,
+                    args.long)
     return _status(items, refused, config.models, out)
 
 

@@ -11,8 +11,8 @@ import numpy as np
 import soundfile as sf
 
 from stemseparator import pipeline
-from stemseparator.audio_io import Tags, Track, write_stem_24bit
-from stemseparator.pipeline import Naming, process_track, resolve_names
+from stemseparator.audio_io import write_stem_24bit
+from stemseparator.pipeline import Naming, process_track
 from stemseparator.separator import SeparatorError
 from stemseparator.staging import staging_root
 from tests import fakes
@@ -62,8 +62,8 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(result.gpu, "FAKE")
         self.assertEqual(result.gpu_seconds, 10.0)
-        self.assertEqual(result.plan.album_dir, self.library / "A" / "B")
-        self.assertEqual(result.plan.title, "T")
+        self.assertEqual(result.plan.album_dir, self.library / "in")
+        self.assertEqual(result.plan.title, "song")
         written = [sf.read(p, dtype="float64") for p in result.plan.stem_paths]
         for path in result.plan.stem_paths:
             info = sf.info(path)
@@ -94,28 +94,21 @@ class PipelineTest(unittest.TestCase):
         result = self._run(self._source(tags={"title": "T"}), fake)
         self.assertTrue(result.ok, result.reason)
         self.assertEqual([p.name for p in result.plan.stem_paths],
-                         ["T - 1 - low.wav", "T - 2 - tops.wav", "T - 3 - music.wav",
-                          "T - 4 - vocals.wav"])
+                         ["song - 1 - low.wav", "song - 2 - tops.wav", "song - 3 - music.wav",
+                          "song - 4 - vocals.wav"])
         self.assertTrue(all(p.is_file() for p in result.plan.stem_paths))
 
-    def test_flags_override_tags(self):
-        source = self._source(tags={"title": "T", "artist": "A", "album": "B"})
-        result = self._run(source, naming=Naming(artist="FA", album="FB", title="FT"))
-        self.assertEqual(result.plan.album_dir, self.library / "FA" / "FB")
+    def test_title_flag_overrides_the_file_name(self):
+        result = self._run(self._source(tags={"title": "T"}), naming=Naming(title="FT"))
         self.assertEqual(result.plan.title, "FT")
 
-    def test_no_tags_uses_file_stem_and_unknowns(self):
-        result = self._run(self._source("my song.flac"))
-        self.assertEqual(result.plan.album_dir, self.library / "Unknown Artist" / "Unknown Album")
-        self.assertEqual(result.plan.title, "my song")
-
-    def test_albumartist_wins_over_artist(self):
-        track = Track(Path("x.flac"), fakes.test_signal(0.1), 44100,
-                      Tags(title="T", artist="Feat", album="B", albumartist="Band"))
-        self.assertEqual(resolve_names(track, Naming()), ("Band", "B", "T"))
-        self.assertEqual(resolve_names(track, Naming(artist="Flag"))[0], "Flag")
-        solo = dataclasses.replace(track, tags=Tags(artist="Feat"))
-        self.assertEqual(resolve_names(solo, Naming()), ("Feat", "Unknown Album", "x"))
+    def test_the_title_is_the_file_name_not_the_tag_and_there_is_no_artist_or_album_folder(self):
+        source = self._source("a098 apaj - Big Party.flac",
+                              tags={"title": "T", "artist": "A", "album": "B"})
+        result = self._run(source)
+        self.assertEqual(result.plan.title, "a098 apaj - Big Party")
+        self.assertEqual(result.plan.album_dir, self.library / "in")
+        self.assertEqual(result.plan.stem_paths[0].name, "a098 apaj - Big Party - 1 - drums.wav")
 
     def test_undecodable_is_skipped_with_reason(self):
         bad = self.inbox / "bad.flac"

@@ -9,11 +9,11 @@ or when its set stands in the library under the name its tags give, all four ste
 from dataclasses import dataclass
 from pathlib import Path
 
-from stemseparator.audio_io import UndecodableError, read_seconds, read_tags
+from stemseparator.audio_io import UndecodableError, read_seconds
 from stemseparator.layout import ORIGINALS_DIR, plan_track
 from stemseparator.manifest import Fingerprint, Manifest, fingerprint
 from stemseparator.naming import OUTPUT_FORMATS, stem_file_name
-from stemseparator.pipeline import Naming, names_from_tags, refusal_before_decode
+from stemseparator.pipeline import Naming, refusal_before_decode, title_for
 
 DONE = "done"
 PENDING = "pending"
@@ -61,11 +61,10 @@ def _original_files(album_dir: Path, title: str) -> list[Path]:
     return [p for p in originals.iterdir() if p.stem == title]
 
 
-def _name_hit(source: Path, source_fp: Fingerprint, library: Path, naming: Naming,
+def _name_hit(source: Path, source_fp: Fingerprint, library: Path, folder: Path, naming: Naming,
               stem_names: tuple[str, ...]) -> tuple[str | None, bool]:
     """(location of a set under the source's own name, whether that set is of another file)."""
-    artist, album, title = names_from_tags(read_tags(source), source, naming)
-    plan = plan_track(library, artist, album, title, source, exists=lambda path: False,
+    plan = plan_track(library, folder, title_for(source, naming), source, exists=lambda path: False,
                       stem_names=stem_names)
     if not set_present(plan.album_dir, plan.title, stem_names):
         return None, False
@@ -81,13 +80,14 @@ def _was_converted_from_here(source: Path, model_set: str, manifest: Manifest) -
     return bool(manifest.with_source(source, model_set))
 
 
-def classify_source(source: Path, source_fp: Fingerprint, *, library: Path, model_set: str,
+def classify_source(source: Path, source_fp: Fingerprint, *, library: Path, folder: Path,
+                    model_set: str,
                     stem_names: tuple[str, ...], naming: Naming, manifest: Manifest,
                     allow_long: bool) -> Item:
     hit = _manifest_hit(source_fp, library, model_set, stem_names, manifest)
     if hit is not None:
         return Item(source, DONE, source_fp, location=hit)
-    location, other_file = _name_hit(source, source_fp, library, naming, stem_names)
+    location, other_file = _name_hit(source, source_fp, library, folder, naming, stem_names)
     if location is not None and not other_file:
         return Item(source, DONE, source_fp, location=location)
     refusal = refusal_before_decode(source, library, allow_long)
@@ -101,7 +101,7 @@ def classify_source(source: Path, source_fp: Fingerprint, *, library: Path, mode
     return Item(source, CHANGED if changed else PENDING, source_fp, seconds=seconds)
 
 
-def classify(sources: list[Path], *, library: Path, model_set: str,
+def classify(sources: list[Path], *, library: Path, folders: dict[Path, Path], model_set: str,
              stem_names: tuple[str, ...], naming: Naming, manifest: Manifest,
              allow_long: bool) -> list[Item]:
     items: list[Item] = []
@@ -117,7 +117,8 @@ def classify(sources: list[Path], *, library: Path, model_set: str,
             items.append(Item(source, DUPLICATE, source_fp, location=str(first_of[key])))
             continue
         first_of[key] = source
-        items.append(classify_source(source, source_fp, library=library, model_set=model_set,
+        items.append(classify_source(source, source_fp, library=library, folder=folders[source],
+                                     model_set=model_set,
                                      stem_names=stem_names, naming=naming, manifest=manifest,
                                      allow_long=allow_long))
     return items

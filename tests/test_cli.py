@@ -52,21 +52,19 @@ class CliTest(unittest.TestCase):
 
     def test_dry_run_prints_names_and_estimate_and_never_builds_a_separator(self):
         source = self._source(seconds=252)
-        code = self._main("--dry-run", "--artist", "Ann", "--album", "Rec", "--title", "Tune",
-                          source)
+        code = self._main("--dry-run", "--title", "Tune", source)
         self.assertEqual(code, 0)
         text = self.out.getvalue()
-        self.assertIn("Ann/Rec/Tune - 1 - drums.flac", text)
+        self.assertIn("in/Tune - 1 - drums.flac", text)
         self.assertIn("4:12", text)
         self.assertIn("~$", text)
         self.assertEqual(self._library_files(), [])
 
     def test_dry_run_names_the_files_after_the_sets_stems(self):
         source = self._source(seconds=3)
-        code = self._main("--dry-run", "--models", "space4", "--artist", "Ann", "--album", "Rec",
-                          "--title", "Tune", source)
+        code = self._main("--dry-run", "--models", "space4", "--title", "Tune", source)
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertIn("Ann/Rec/Tune - 1 - low.flac", self.out.getvalue())
+        self.assertIn("in/Tune - 1 - low.flac", self.out.getvalue())
 
     def test_stems_are_flac_by_default(self):
         self._write_config(f'library = "{self.library}"\n')

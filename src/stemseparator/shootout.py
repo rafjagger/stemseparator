@@ -22,7 +22,7 @@ from stemseparator.compare import RUNS_FILE
 from stemseparator.layout import is_inside
 from stemseparator.naming import DEFAULT_OUTPUT_FORMAT, sanitise_name, stem_file_name
 from stemseparator.pipeline import (
-    MAX_SECONDS, OUTPUT_SAMPLE_RATE, Naming, resolve_names, result_problem, separate_with_retries)
+    MAX_SECONDS, OUTPUT_SAMPLE_RATE, Naming, result_problem, title_for, separate_with_retries)
 from stemseparator.separator import Separation, Separator, SeparatorError
 
 SHOOTOUT_DIR = "shootout"
@@ -156,7 +156,7 @@ def run_shootout(source: Path, set_names: list[str], *, library: Path, separator
         track = read_track(source)
     except UndecodableError as error:
         raise ShootoutError(f"{source}: {error}") from error
-    title = sanitise_name(resolve_names(track, naming)[2], "Untitled")
+    title = sanitise_name(title_for(source, naming), "Untitled")
     folder.mkdir(parents=True, exist_ok=True)
     entries = dict(runs.get("sets", {}))
     finished: dict[str, SetRun] = {}
