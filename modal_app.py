@@ -8,7 +8,7 @@ container imports this file, and the ping image carries neither numpy nor torch.
 import modal
 
 from stemseparator.remote.registry import (
-    MODEL_SAMPLE_RATE, MODELS, MSST_COMMIT, MSST_DIR, MSST_REPO, WEIGHTS_DIR)
+    MODEL_SAMPLE_RATE, MODEL_SETS, MODELS, MSST_COMMIT, MSST_DIR, MSST_REPO, WEIGHTS_DIR)
 
 app = modal.App("stemseparator")
 weights = modal.Volume.from_name("stemseparator-weights", create_if_missing=True)
@@ -32,13 +32,10 @@ image = (
 ping_image = modal.Image.debian_slim(python_version="3.11").add_local_python_source("stemseparator")
 
 
-def _model_specs(models: list[str]) -> list:
-    unknown = [name for name in models if name not in MODELS]
-    if unknown:
-        raise ValueError(f"unknown model(s): {', '.join(unknown)}")
-    if not models:
-        raise ValueError("no models requested")
-    return [MODELS[name] for name in models]
+def _model_set(name: str):
+    if name not in MODEL_SETS:
+        raise ValueError(f"unknown model set '{name}' (known: {', '.join(MODEL_SETS)})")
+    return MODEL_SETS[name]
 
 
 def _commit_new_weights(downloaded: bool) -> None:
@@ -52,30 +49,31 @@ def _commit_new_weights(downloaded: bool) -> None:
         print(f"weights volume commit failed, continuing: {error!r}", flush=True)
 
 
+# memory=16384 fits both sets at the 20-min cap: the specialist holds the mix, one 4-stem result,
+# a float64 sum of the picked stems and the output set, no more than ensemble4's accumulator path.
 @app.function(image=image, gpu=["A10", "L4"], volumes={WEIGHTS_DIR: weights}, timeout=1800,
               max_containers=4, scaledown_window=60, memory=16384)
-def separate(upload: bytes, models: list[str]) -> dict:
+def separate(upload: bytes, model_set: str) -> dict:
     import time
 
     import numpy as np
     import torch
 
     from stemseparator import sumcheck, transport
-    from stemseparator.remote import ensemble, runner
+    from stemseparator.remote import assemble, runner
 
     started = time.monotonic()
-    specs = _model_specs(models)
+    chosen = _model_set(model_set)
     audio, sample_rate = transport.decode_upload(upload)
     mix = runner.resample(audio.T, sample_rate, MODEL_SAMPLE_RATE)
     del audio
-    downloaded = [runner.download_missing(spec) for spec in specs]
+    downloaded = [runner.download_missing(MODELS[name]) for name in chosen.models]
     _commit_new_weights(any(downloaded))
     device = torch.device("cuda")
-    accumulator = ensemble.StemAccumulator()
-    for spec in specs:
-        accumulator.add(runner.run_model(spec, mix, device))
-    stems = np.ascontiguousarray(np.transpose(accumulator.mean(), (0, 2, 1)))
-    del accumulator
+    separated = assemble.separate_with_set(
+        chosen, mix, lambda name: runner.run_model(MODELS[name], mix, device))
+    stems = np.ascontiguousarray(np.transpose(separated, (0, 2, 1)))
+    del separated
     residual = sumcheck.residual_db(mix.T, stems)
     return transport.encode_result(stems, time.monotonic() - started,
                                    torch.cuda.get_device_name(), MODEL_SAMPLE_RATE, residual)
