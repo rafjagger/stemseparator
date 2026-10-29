@@ -49,8 +49,8 @@ def _commit_new_weights(downloaded: bool) -> None:
         print(f"weights volume commit failed, continuing: {error!r}", flush=True)
 
 
-# memory=16384 fits both sets at the 20-min cap: the specialist holds the mix, one 4-stem result,
-# a float64 sum of the picked stems and the output set, no more than ensemble4's accumulator path.
+# memory=16384 fits every set at the 20-min cap: the largest holds the mix, one 6-stem result
+# (BS-RoFormer SW, ~2.5 GB), a float64 sum of the picked stems and the output set.
 @app.function(image=image, gpu=["A10", "L4"], volumes={WEIGHTS_DIR: weights}, timeout=1800,
               max_containers=4, scaledown_window=60, memory=16384)
 def separate(upload: bytes, model_set: str) -> dict:
