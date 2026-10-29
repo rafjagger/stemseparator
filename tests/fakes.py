@@ -9,9 +9,12 @@ from stemseparator.naming import STEM_NAMES
 from stemseparator.separator import Separation, SeparatorError
 
 
-def test_signal(seconds: float = 1.0, rate: int = 44100, channels: int = 2) -> np.ndarray:
-    """440 Hz sine at 0.5 plus white noise at 0.05, float32 (frames, channels)."""
-    rng = np.random.default_rng(0)
+def test_signal(seconds: float = 1.0, rate: int = 44100, channels: int = 2,
+                seed: int = 0) -> np.ndarray:
+    """440 Hz sine at 0.5 plus white noise at 0.05, float32 (frames, channels).
+
+    Another seed is another track: the batch tools tell tracks apart by their content."""
+    rng = np.random.default_rng(seed)
     frames = int(seconds * rate)
     sine = 0.5 * np.sin(2 * np.pi * 440 * np.arange(frames) / rate)
     noise = 0.05 * rng.standard_normal((frames, channels))

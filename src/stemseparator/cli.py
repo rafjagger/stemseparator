@@ -7,10 +7,12 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from stemseparator import compare, cost, pipeline, shootout
+from stemseparator import batch_plan, compare, cost, pipeline, shootout
 from stemseparator.audio_io import UndecodableError, read_track
+from stemseparator.batch_plan import CHANGED, DONE, DUPLICATE, PENDING, UNSUPPORTED, Item
 from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 from stemseparator.layout import plan_track
+from stemseparator.manifest import Manifest, ManifestError
 from stemseparator.naming import OUTPUT_FORMATS, STEM_NAMES
 from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
@@ -57,6 +59,8 @@ def _build_parser(err: TextIO) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true",
                         help="show names and cost estimate, write and upload nothing")
     parser.add_argument("--long", action="store_true", help="allow tracks longer than 20 min")
+    parser.add_argument("--redo", action="store_true",
+                        help="separate tracks the library already holds again, replacing their sets")
     parser.add_argument("--models", metavar="SET",
                         help=f"model set, overrides the config ({', '.join(MODEL_SETS)})")
     parser.add_argument("--format", choices=OUTPUT_FORMATS,
@@ -76,6 +80,20 @@ def _build_compare_parser(err: TextIO) -> argparse.ArgumentParser:
     parser.add_argument("--mix", type=Path, help="the track (default: from runs.json)")
     parser.add_argument("--at", type=float, metavar="SECONDS",
                         help="start of the excerpts (default: the loudest 12 s of the mix)")
+    return parser
+
+
+def _build_status_parser(err: TextIO) -> argparse.ArgumentParser:
+    parser = _Parser(err, prog="stemseparator status",
+                     description="List which tracks in the folders are converted, pending, "
+                                 "changed or unsupported. Uploads nothing.")
+    parser.add_argument("paths", nargs="+", type=Path, help="audio files or folders")
+    parser.add_argument("--artist")
+    parser.add_argument("--album")
+    parser.add_argument("--library", type=Path, help="overrides the config's library")
+    parser.add_argument("--models", metavar="SET", help="model set, overrides the config")
+    parser.add_argument("--format", choices=OUTPUT_FORMATS, help=argparse.SUPPRESS)
+    parser.add_argument("--long", action="store_true", help="allow tracks longer than 20 min")
     return parser
 
 
@@ -130,19 +148,74 @@ def _dry_run_line(source: Path, config: Config, naming: Naming,
     return f"{source} → {first_stem} … ({detail})", estimate, None
 
 
-def _dry_run(sources: list[Path], refused: list[TrackResult], config: Config, naming: Naming,
-             allow_long: bool, out: TextIO) -> int:
+def _skip_line(item: Item) -> str:
+    if item.state == DUPLICATE:
+        return f"{item.source} → skipped: same content as {item.location}"
+    return f"{item.source} → skipped: already done ({item.location})"
+
+
+def _runnable(items: list[Item], redo: bool) -> list[Item]:
+    wanted = (PENDING, CHANGED, DONE) if redo else (PENDING, CHANGED)
+    return [item for item in items if item.state in wanted]
+
+
+def _dry_run(items: list[Item], refused: list[TrackResult], config: Config, naming: Naming,
+             allow_long: bool, redo: bool, out: TextIO) -> int:
     failed = list(refused)
+    runnable = _runnable(items, redo)
     total = 0.0
-    for source in sources:
-        line, estimate, reason = _dry_run_line(source, config, naming, allow_long)
-        print(line, file=out)
+    for item in items:
+        if item.state == UNSUPPORTED:
+            print(f"{item.source} → failed: {item.reason}", file=out)
+            failed.append(TrackResult(source=item.source, ok=False, reason=item.reason))
+        elif item not in runnable:
+            print(_skip_line(item), file=out)
+    for item in runnable:
+        line, estimate, reason = _dry_run_line(item.source, config, naming, allow_long)
+        print(line + (" [changed since done]" if item.state == CHANGED else ""), file=out)
         total += estimate
         if reason is not None:
-            failed.append(TrackResult(source=source, ok=False, reason=reason))
-    print(f"{len(sources)} track(s), estimated {format_cost(total)} (approx.)", file=out)
+            failed.append(TrackResult(source=item.source, ok=False, reason=reason))
+    skipped = sum(1 for item in items if item.state in (DONE, DUPLICATE)) - sum(
+        1 for item in runnable if item.state == DONE)
+    note = f", {skipped} already done (skipped)" if skipped else ""
+    print(f"{len(runnable)} track(s), estimated {format_cost(total)} (approx.){note}", file=out)
     _print_failed(failed, out)
     return EXIT_FAILED_TRACKS if failed else EXIT_OK
+
+
+def _status_line(item: Item) -> str:
+    if item.state == DONE:
+        return f"done        {item.source}  → {item.location}"
+    if item.state == DUPLICATE:
+        return f"duplicate   {item.source}  same content as {item.location}"
+    if item.state == UNSUPPORTED:
+        return f"unsupported {item.source}  {item.reason}"
+    detail = f"{format_duration(item.seconds)}, {{estimate}}"
+    suffix = "  differs from the converted file" if item.state == CHANGED else ""
+    return f"{item.state:<11} {item.source}  ({detail}){suffix}"
+
+
+def _status(items: list[Item], refused: list[TrackResult], model_set: str, out: TextIO) -> int:
+    todo, estimate = [], 0.0
+    for item in items:
+        line = _status_line(item)
+        if item.state in (PENDING, CHANGED):
+            usd = cost.estimate_usd(item.seconds, model_set)
+            estimate += usd
+            todo.append(item)
+            line = line.format(estimate=format_cost(usd))
+        print(line, file=out)
+    for result in refused:
+        print(f"unsupported {result.source}  {result.reason}", file=out)
+    counts = {state: sum(1 for item in items if item.state == state)
+              for state in (DONE, PENDING, CHANGED, DUPLICATE, UNSUPPORTED)}
+    counts[UNSUPPORTED] += len(refused)
+    print(" · ".join([", ".join(f"{count} {state}" for state, count in counts.items() if count)
+                      or "no tracks",
+                      f"to do: {len(todo)} track(s), estimated {format_cost(estimate)} (approx.)"]),
+          file=out)
+    return EXIT_OK
 
 
 def _result_cost(result: TrackResult) -> str:
@@ -159,11 +232,15 @@ def _warnings(result: TrackResult) -> list[str]:
     return lines
 
 
-def _make_reporter(total: int, out: TextIO) -> Callable[[TrackResult], None]:
+def _make_reporter(total: int, out: TextIO,
+                   after_done: Callable[[TrackResult], None] = lambda result: None
+                   ) -> Callable[[TrackResult], None]:
     counter = {"finished": 0}
 
     def report(result: TrackResult) -> None:
         counter["finished"] += 1
+        if result.ok:
+            after_done(result)
         prefix = f"[{counter['finished']}/{total}]"
         if not result.ok:
             print(f"{prefix} {result.source.stem}: failed: {result.reason}", file=out)
@@ -214,22 +291,54 @@ def _library_problem(library: Path) -> str | None:
     return None
 
 
-def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -> int:
-    if not sources:
-        _print_failed(refused, out)
-        return EXIT_FAILED_TRACKS
+def _remember(manifest: Manifest, items: list[Item], config: Config) -> Callable[[TrackResult], None]:
+    """Each finished track goes into the manifest at once, so an interrupted run resumes."""
+    fingerprints = {item.source: item.fingerprint for item in items}
+
+    def record(result: TrackResult) -> None:
+        manifest.record(result.source, fingerprints[result.source], config.models,
+                        str(result.plan.album_dir.relative_to(config.library)), result.plan.title)
+    return record
+
+
+def _adopt_untracked(manifest: Manifest, items: list[Item], config: Config) -> None:
+    """A set found by its name gets a manifest entry, so a later rename still counts as done."""
+    for item in items:
+        if item.state != DONE or manifest.with_content(item.fingerprint, config.models):
+            continue
+        location = Path(item.location)
+        manifest.record(item.source, item.fingerprint, config.models, str(location.parent),
+                        location.name)
+
+
+def _real_run(items, refused, manifest, config, naming, redo, allow_long, factory, out, err) -> int:
+    runnable = _runnable(items, redo)
+    skipped = len([item for item in items if item.state in (DONE, DUPLICATE)]) - len(
+        [item for item in runnable if item.state == DONE])
+    if skipped:
+        print(f"skipping {skipped} track(s) already done (--redo converts them again)", file=out)
     problem = _library_problem(config.library)
     if problem is not None:
         print(f"error: {problem}", file=err)
         return EXIT_USAGE
+    _adopt_untracked(manifest, items, config)
+    unsupported = [TrackResult(source=item.source, ok=False, reason=item.reason)
+                   for item in items if item.state == UNSUPPORTED]
+    refused = [*refused, *unsupported]
+    if not runnable:
+        _print_failed(refused, out)
+        return EXIT_FAILED_TRACKS if refused else EXIT_OK
+    sources = [item.source for item in runnable]
     separator = _build_separator(factory, err)
     if separator is None:
         return EXIT_USAGE
     at_once = min(config.parallel, len(sources))
     print(f"separating {len(sources)} track(s) with {config.models}, up to {at_once} at a time…",
           file=out, flush=True)
-    summary = run_batch(sources, parallel=config.parallel, report=_make_reporter(len(sources), out),
+    report = _make_reporter(len(sources), out, _remember(manifest, items, config))
+    summary = run_batch(sources, parallel=config.parallel, report=report,
                         on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
+                        overwrite=frozenset(item.source for item in runnable if item.state == DONE),
                         library=config.library, separator=separator, model_set=config.models,
                         naming=naming, allow_long=allow_long, output_format=config.format)
     _print_summary(summary, refused, out)
@@ -353,6 +462,8 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
          out: TextIO = sys.stdout, err: TextIO = sys.stderr) -> int:
     if argv[:1] == ["compare"]:
         return compare_main(argv[1:], out, err)
+    if argv[:1] == ["status"]:
+        return status_main(argv[1:], config_path, known_sets, out, err)
     parser = _build_parser(err)
     try:
         args = parser.parse_args(argv)
@@ -375,18 +486,48 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
             return EXIT_INTERRUPTED
     if not args.paths:
         return _usage("give audio files or folders (or --shootout TRACK --sets …)", err)
-    sources, refused = collect_inputs(args.paths)
+    sources, refused = collect_inputs(args.paths, skip=config.library)
     if args.title and len(sources) > 1:
         print("error: --title only works with a single input track", file=err)
         return EXIT_USAGE
     try:
+        manifest = Manifest(config.library)
+    except ManifestError as error:
+        return _usage(str(error), err)
+    try:
+        items = _triage(sources, config, naming, manifest, args.long)
         if args.dry_run:
-            return _dry_run(sources, refused, config, naming, args.long, out)
-        return _real_run(sources, refused, config, naming, args.long,
+            return _dry_run(items, refused, config, naming, args.long, args.redo, out)
+        return _real_run(items, refused, manifest, config, naming, args.redo, args.long,
                          separator_factory or _default_separator_factory, out, err)
     except KeyboardInterrupt:
         print(INTERRUPTED_LINE, file=err)
         return EXIT_INTERRUPTED
+
+
+def _triage(sources: list[Path], config: Config, naming: Naming, manifest: Manifest,
+            allow_long: bool) -> list[Item]:
+    return batch_plan.classify(sources, library=config.library, model_set=config.models,
+                               stem_names=_stem_names(config.models), naming=naming,
+                               manifest=manifest, allow_long=allow_long)
+
+
+def status_main(argv: list[str], config_path: Path, known_sets: frozenset[str] | None,
+                out: TextIO, err: TextIO) -> int:
+    try:
+        args = _build_status_parser(err).parse_args(argv)
+        config = _load_settings(args, config_path, known_sets)
+    except SystemExit as stop:
+        return int(stop.code or 0)
+    except ConfigError as error:
+        return _usage(str(error), err)
+    sources, refused = collect_inputs(args.paths, skip=config.library)
+    try:
+        manifest = Manifest(config.library)
+    except ManifestError as error:
+        return _usage(str(error), err)
+    items = _triage(sources, config, Naming(args.artist, args.album), manifest, args.long)
+    return _status(items, refused, config.models, out)
 
 
 def main_entry() -> None:
