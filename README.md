@@ -2,9 +2,27 @@
 
 A local command-line tool that sends audio (FLAC, WAV or AIFF) to a rented cloud GPU, separates it into four stems and writes the result as a stem set for StemDeck (44.1 kHz, 24-bit).
 
-The separation runs on [Modal](https://modal.com) as an ensemble of two models from
+The separation runs on [Modal](https://modal.com) with models loaded through
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training)
-(MSST, pinned to one commit): SCNet XL IHF and BS-RoFormer. Their stems are averaged.
+(MSST, pinned to one commit). Two model sets are selectable with `--models`:
+
+- **`specialist`** (default): vocals from Kimberley Jensen's Mel-Band RoFormer, drums and bass
+  from SCNet XL IHF, and other = the mix minus those three, so the four stems sum back to the mix.
+- **`ensemble4`**: SCNet Masked XL IHF and BS-RoFormer, all four stems averaged (the earlier
+  default).
+
+`htdemucs_ft` (Demucs v4, one fine-tuned checkpoint per stem) is there as a reference.
+
+Published SDR in dB on MVSep's Multisong set, from MSST's `docs/pretrained_models.md`:
+
+| Model | drums | bass | other | vocals |
+|---|---|---|---|---|
+| SCNet XL IHF (specialist: drums, bass) | 11.58 | 11.94 | 6.49 | 9.69 |
+| Mel-Band RoFormer, Kimberley Jensen (specialist: vocals) | | | | 10.98 |
+| SCNet Masked XL IHF (ensemble4) | 11.38 | 11.57 | 6.30 | 9.43 |
+| BS-RoFormer ep 17 (ensemble4) | 11.29 | 11.08 | 5.96 | 9.19 |
+
+No figures are published for the averaged ensemble or for the specialist's residual "other".
 
 ## Setup
 
@@ -30,6 +48,7 @@ The command lives in the venv: run `source .venv/bin/activate` once per terminal
 ```
 stemseparator ~/Music/new/                    # the audio files directly in the folder
 stemseparator track.flac --artist X --album Y
+stemseparator --models ensemble4 track.flac   # another model set than the config's
 stemseparator --dry-run …                     # names and cost estimate, no upload
 ```
 
@@ -49,8 +68,9 @@ twice; a track that still fails leaves nothing in the library.
   plus the untouched source under `originals/`.
 - GPU seconds and cost per track are approximate: wall time on the GPU times Modal's list price;
   cold starts and idle time are not in it.
-- The `--dry-run` cost is a rough guess: it assumes 0.3 GPU seconds per second of audio and model,
-  a placeholder until the first real runs have been measured.
+- The `--dry-run` cost is a rough guess: it assumes 0.3 GPU seconds per second of audio and
+  checkpoint run (two for `specialist` and `ensemble4`, four for `htdemucs_ft`), a placeholder
+  until the first real runs have been measured.
 
 ## Config
 
@@ -58,7 +78,7 @@ twice; a track that still fails leaves nothing in the library.
 
 ```toml
 library = "~/Music/stems"                       # where stem sets go
-models = ["scnet_xl_ihf", "bs_roformer_ep17"]   # averaged; also known: "htdemucs_ft"
+models = "specialist"                           # model set: specialist, ensemble4, htdemucs_ft
 parallel = 4                                    # tracks on the GPU at once
 ```
 
@@ -72,8 +92,17 @@ current statement on this before uploading material that must not leave your han
 ## Model weights
 
 The weights are downloaded from their public release pages at run time and are never committed to
-this repository. The models were trained on MUSDB18, which is licensed for research and
-non-commercial use; check the terms of each model before using its stems commercially.
+this repository. Where the host publishes a sha256 (GitHub release assets, Hugging Face LFS), the
+download is checked against it. Licences as published:
+
+| Weights | Source | Licence as published |
+|---|---|---|
+| SCNet XL IHF, SCNet Masked XL IHF, BS-RoFormer ep 17 | MSST GitHub releases | none stated for the weights (MSST's code is MIT); trained on MUSDB18-HQ, licensed for research and non-commercial use |
+| Mel-Band RoFormer vocals (Kimberley Jensen) | Hugging Face `KimberleyJSN/melbandroformer` | MIT on the model card; community weights, training data not stated |
+| htdemucs_ft | Meta's Demucs release | Demucs repository MIT; none stated separately for the weights |
+
+These are community and research weights with unclear terms for commercial use. That is fine for
+a personal DJ library; check each model's terms before using its stems commercially.
 
 ## Development
 
