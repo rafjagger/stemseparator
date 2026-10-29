@@ -14,7 +14,7 @@ import numpy as np
 
 from stemseparator import cost
 from stemseparator.audio_io import (
-    AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Track, UndecodableError, read_seconds, read_track,
+    AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Tags, Track, UndecodableError, read_seconds, read_track,
     unsupported_format_message, write_stem_24bit)
 from stemseparator.layout import TrackPlan, is_inside, plan_track
 from stemseparator.naming import DEFAULT_OUTPUT_FORMAT
@@ -50,13 +50,16 @@ class TrackResult:
     clipped: int = 0
 
 
-def resolve_names(track: Track, naming: Naming) -> tuple[str, str, str]:
+def names_from_tags(tags: Tags, path: Path, naming: Naming) -> tuple[str, str, str]:
     """Raw names, flag > tag > fallback; plan_track sanitises them."""
-    tags = track.tags
     artist = naming.artist or tags.albumartist or tags.artist or "Unknown Artist"
     album = naming.album or tags.album or "Unknown Album"
-    title = naming.title or tags.title or track.path.stem
+    title = naming.title or tags.title or path.stem
     return artist, album, title
+
+
+def resolve_names(track: Track, naming: Naming) -> tuple[str, str, str]:
+    return names_from_tags(track.tags, track.path, naming)
 
 
 def _failed(source: Path, reason: str) -> TrackResult:
@@ -91,7 +94,7 @@ def _write_stems(staged: StagedSet, stems: np.ndarray) -> int:
 
 def _commit_set(source: Path, library: Path, separation: Separation,
                 names: tuple[str, str, str], output_format: str,
-                cancel: threading.Event | None) -> tuple[TrackPlan, int]:
+                cancel: threading.Event | None, overwrite: bool) -> tuple[TrackPlan, int]:
     artist, album, title = names
     with StagedSet(library, output_format) as staged:
         clipped = _write_stems(staged, separation.stems)
@@ -99,7 +102,10 @@ def _commit_set(source: Path, library: Path, separation: Separation,
         # Checked as late as possible: writing takes seconds, the rename does not.
         if _is_cancelled(cancel):
             raise _Abandoned
+        # --redo replaces the set under its own name instead of writing a " (2)" beside it.
+        exists = (lambda path: False) if overwrite else Path.exists
         plan = commit(staged, lambda: plan_track(library, artist, album, title, source,
+                                                 exists=exists,
                                                  stem_names=separation.stem_names,
                                                  extension=output_format))
     return plan, clipped
@@ -137,7 +143,8 @@ def process_track(source: Path, *, library: Path, separator: Separator, model_se
                   naming: Naming, allow_long: bool,
                   sleep: Callable[[float], None] = time.sleep,
                   cancel: threading.Event | None = None,
-                  output_format: str = DEFAULT_OUTPUT_FORMAT) -> TrackResult:
+                  output_format: str = DEFAULT_OUTPUT_FORMAT,
+                  overwrite: bool = False) -> TrackResult:
     """`cancel` set means the user abandoned the batch: nothing more may land in the library."""
     source = Path(source)
     refusal = refusal_before_decode(source, library, allow_long)
@@ -158,7 +165,7 @@ def process_track(source: Path, *, library: Path, separator: Separator, model_se
         return _failed(source, problem)
     try:
         plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming),
-                                    output_format, cancel)
+                                    output_format, cancel, overwrite)
     except _Abandoned:
         return _failed(source, ABANDONED_REASON)
     except Exception as error:  # the staged set is already gone; the batch continues
@@ -185,10 +192,20 @@ def _refusal_for_file(path: Path) -> str:
     return "not an audio file"
 
 
-def _scan_folder(folder: Path) -> tuple[list[Path], list[TrackResult]]:
+def _scan_folder(folder: Path, skip: Path | None) -> tuple[list[Path], list[TrackResult]]:
+    """Depth first, sorted; hidden entries and the `skip` folder (the library) are left out."""
     accepted, refused = [], []
     for child in sorted(folder.iterdir()):
-        if child.name.startswith(".") or not child.is_file():
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            if skip is not None and is_inside(child, skip):
+                continue
+            found, not_accepted = _scan_folder(child, skip)
+            accepted += found
+            refused += not_accepted
+            continue
+        if not child.is_file():
             continue
         suffix = child.suffix.lower()
         if suffix in AUDIO_SUFFIXES:
@@ -211,13 +228,17 @@ def _without_duplicates(files: list[Path]) -> list[Path]:
     return unique
 
 
-def collect_inputs(paths: list[Path]) -> tuple[list[Path], list[TrackResult]]:
-    """Expand folders (direct children only) and report what cannot be processed."""
+def collect_inputs(paths: list[Path],
+                   skip: Path | None = None) -> tuple[list[Path], list[TrackResult]]:
+    """Expand folders recursively and report what cannot be processed.
+
+    `skip` is a folder never walked into: the library, which may lie inside a music folder.
+    """
     files: list[Path] = []
     refused: list[TrackResult] = []
     for path in map(Path, paths):
         if path.is_dir():
-            found, not_accepted = _scan_folder(path)
+            found, not_accepted = _scan_folder(path, skip)
             files += found
             refused += not_accepted
         elif not path.exists():
@@ -316,11 +337,13 @@ def run_batch(sources: list[Path], *, parallel: int, report: Callable[[TrackResu
               cancel: threading.Event | None = None,
               on_stopping: Callable[[int], None] = _ignore_count,
               on_abandoning: Callable[[int], None] = _ignore_count,
+              overwrite: frozenset[Path] = frozenset(),
               **track_kwargs) -> BatchSummary:
     """Threads, not processes: the work is waiting on the network.
 
     A first Ctrl-C drops queued tracks and waits for the running ones (on_stopping gets their
     count); a second one sets `cancel`, so those write nothing, and returns without them.
+    Sources in `overwrite` replace the set that stands under their name.
     """
     cancel = cancel if cancel is not None else threading.Event()
     progress = _BatchProgress(len(sources), report)
@@ -328,7 +351,7 @@ def run_batch(sources: list[Path], *, parallel: int, report: Callable[[TrackResu
     try:
         for source in sources:
             progress.add(executor.submit(_process_track_safely, source, cancel=cancel,
-                                         **track_kwargs))
+                                         overwrite=source in overwrite, **track_kwargs))
         progress.collect()
     except KeyboardInterrupt:
         return _stop_after_interrupt(executor, progress, cancel, on_stopping, on_abandoning)

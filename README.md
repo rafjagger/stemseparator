@@ -63,14 +63,14 @@ The command lives in the venv: run `source .venv/bin/activate` once per terminal
 `.venv/bin/stemseparator`.
 
 ```
-stemseparator ~/Music/new/                    # the audio files directly in the folder
+stemseparator ~/Music/new/                    # every FLAC/WAV/AIFF in the folder and below
 stemseparator track.flac --artist X --album Y
 stemseparator --models ensemble4 track.flac   # another model set than the config's
 stemseparator --dry-run …                     # names and cost estimate, no upload
 ```
 
-A folder is read one level deep: files in its subfolders are not picked up. The same file given
-twice (or a folder plus a file inside it) is separated once. Ctrl-C stops starting new tracks and
+A folder is walked recursively; hidden entries and the library itself (if it lies inside) are left
+out. The same file given twice (or a folder plus a file inside it) is separated once. Ctrl-C stops starting new tracks and
 waits for the running ones, whose GPU time is already paid; a second Ctrl-C abandons them, and
 they write nothing.
 
@@ -92,6 +92,36 @@ twice; a track that still fails leaves nothing in the library.
   checkpoint run (three for `space4` and `space4sw`, two for `specialist` and `ensemble4`, one
   for `sw4`, four for `htdemucs_ft`), a placeholder
   until the first real runs have been measured.
+
+## Converting your folders
+
+```
+stemseparator status ~/Music     # per track: done, pending, changed, unsupported; totals and cost
+stemseparator ~/Music            # converts what is pending, skips what is done
+bin/stems-convert [folder…]      # both in a row (default ~/Music); extra flags go to both
+```
+
+`status` uploads nothing and writes nothing; it ends with the totals and the estimated cost of
+the pending tracks (the same rough estimate as `--dry-run`, which shows this plan for a normal
+run). Only FLAC, WAV and AIFF are taken; other files are skipped silently, MP3/OGG and the like
+are listed as unsupported.
+
+A track is **done** when either of these holds, checked before anything is uploaded:
+
+- the library holds its set under the name its tags give (artist, album, title; `--artist`,
+  `--album`, `--title` count), all four stems of the model set present, in FLAC or WAV, and the
+  stored original is the same file (a different file under the same name is *changed*, not done);
+- `<library>/.stemseparator-manifest.json` knows its content: source path, size, mtime, a sha256
+  of the first and last MB, model set, date, output folder. A renamed or moved file is therefore
+  still done; a file whose hash differs is *changed* and counts as new.
+
+Done tracks are skipped, never written a second time as `Title (2)`. `--redo` converts them again
+and replaces their set. Two files with the same content in one run are converted once. Each
+finished track enters the manifest at once, so an interrupted run (Ctrl-C, power cut) continues
+with the rest when started again; staging guarantees no half set is ever in the library. A
+manifest that cannot be read stops the run without changing anything.
+
+The stem creator will move into A³ Canvas later; this is the stand-in until then.
 
 ## Shootout: comparing model sets
 

@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Raphael Eismann
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Show what is left to convert, then convert it. Folders default to ~/Music; the library and
+# `parallel` come from ~/.config/stemseparator/config.toml. Extra flags (--redo, --models …)
+# go to both commands.
+set -eu
+here=$(cd "$(dirname "$0")/.." && pwd)
+stemseparator="$here/.venv/bin/stemseparator"
+[ -x "$stemseparator" ] || stemseparator=stemseparator
+[ "$#" -gt 0 ] || set -- "$HOME/Music"
+"$stemseparator" status "$@"
+"$stemseparator" "$@"

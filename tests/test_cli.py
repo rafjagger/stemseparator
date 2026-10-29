@@ -3,6 +3,7 @@
 import io
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -36,7 +37,7 @@ class CliTest(unittest.TestCase):
     def _source(self, name="song.flac", seconds=1.0):
         path = self.inbox / name
         with sf.SoundFile(path, "w", 44100, 2, format=path.suffix[1:].upper()) as handle:
-            handle.write(fakes.test_signal(seconds))
+            handle.write(fakes.test_signal(seconds, seed=zlib.crc32(name.encode())))
         return path
 
     def _main(self, *argv, separator=None, known_sets=None):
@@ -46,7 +47,8 @@ class CliTest(unittest.TestCase):
                         out=self.out, err=self.err)
 
     def _library_files(self):
-        return sorted(p for p in self.library.rglob("*") if p.is_file()) if self.library.exists() else []
+        return sorted(p for p in self.library.rglob("*")
+                      if p.is_file() and not p.name.startswith(".")) if self.library.exists() else []
 
     def test_dry_run_prints_names_and_estimate_and_never_builds_a_separator(self):
         source = self._source(seconds=252)
