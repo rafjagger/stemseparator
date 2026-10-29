@@ -35,20 +35,20 @@ class FakeSeparator:
         self.error = error if error is not None else SeparatorError("boom", transient=True)
         self.unavailable = unavailable
         self.gpu_seconds = gpu_seconds
-        self.calls: list[tuple[int, tuple[str, ...]]] = []
+        self.calls: list[tuple[int, str]] = []
         self._lock = threading.Lock()
 
     def preflight(self) -> None:
         if self.unavailable is not None:
             raise self.unavailable
 
-    def _register_call(self, frames: int, models: tuple[str, ...]) -> bool:
+    def _register_call(self, frames: int, model_set: str) -> bool:
         with self._lock:
-            self.calls.append((frames, models))
+            self.calls.append((frames, model_set))
             return len(self.calls) <= self.fail_times
 
-    def separate(self, audio: np.ndarray, sample_rate: int, models: tuple[str, ...]) -> Separation:
-        if self._register_call(audio.shape[0], models):
+    def separate(self, audio: np.ndarray, sample_rate: int, model_set: str) -> Separation:
+        if self._register_call(audio.shape[0], model_set):
             raise self.error
         mix = audio if sample_rate == 44100 else _resample_linear(audio, sample_rate, 44100)
         stems = np.stack([w * mix for w in self.weights]).astype(np.float32)

@@ -70,11 +70,11 @@ def _is_cancelled(cancel: threading.Event | None) -> bool:
     return cancel is not None and cancel.is_set()
 
 
-def _separate_with_retries(track: Track, separator: Separator, models: tuple[str, ...],
+def _separate_with_retries(track: Track, separator: Separator, model_set: str,
                            sleep: Callable[[float], None]) -> Separation:
     for attempt in range(ATTEMPTS):
         try:
-            return separator.separate(track.audio, track.sample_rate, models)
+            return separator.separate(track.audio, track.sample_rate, model_set)
         except SeparatorError as error:
             is_last = attempt == ATTEMPTS - 1
             if not error.transient or is_last:
@@ -130,7 +130,7 @@ def _result_problem(track: Track, separation: Separation) -> str | None:
     return None
 
 
-def process_track(source: Path, *, library: Path, separator: Separator, models: tuple[str, ...],
+def process_track(source: Path, *, library: Path, separator: Separator, model_set: str,
                   naming: Naming, allow_long: bool,
                   sleep: Callable[[float], None] = time.sleep,
                   cancel: threading.Event | None = None) -> TrackResult:
@@ -146,7 +146,7 @@ def process_track(source: Path, *, library: Path, separator: Separator, models: 
     if _is_cancelled(cancel):
         return _failed(source, ABANDONED_REASON)
     try:
-        separation = _separate_with_retries(track, separator, models, sleep)
+        separation = _separate_with_retries(track, separator, model_set, sleep)
     except SeparatorError as error:
         return _failed(source, str(error))
     problem = _result_problem(track, separation)

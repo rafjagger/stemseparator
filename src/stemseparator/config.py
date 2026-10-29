@@ -4,11 +4,13 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from stemseparator.remote.registry import DEFAULT_MODEL_SET
+
 
 @dataclass(frozen=True)
 class Config:
     library: Path = Path("~/Music/stems").expanduser()
-    models: tuple[str, ...] = ("scnet_xl_ihf", "bs_roformer_ep17")
+    models: str = DEFAULT_MODEL_SET  # the name of a model set in the registry
     parallel: int = 4
 
 
@@ -43,11 +45,14 @@ def _library(value, path: Path) -> Path:
     return Path(value).expanduser()
 
 
-def _models(value, path: Path) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value \
-            or not all(isinstance(name, str) for name in value):
-        raise ConfigError(f"'models' in {path} must be a non-empty list of strings")
-    return tuple(value)
+def _models(value, path: Path) -> str:
+    if isinstance(value, list):
+        # The earlier form listed models to average; a set name replaced it.
+        raise ConfigError(f"'models' in {path} names one model set now, "
+                          f'e.g. models = "{DEFAULT_MODEL_SET}" or models = "ensemble4"')
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"'models' in {path} must be a model set name")
+    return value
 
 
 def _parallel(value, path: Path) -> int:

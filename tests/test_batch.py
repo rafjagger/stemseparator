@@ -25,13 +25,13 @@ class TrackingSeparator(FakeSeparator):
         self.max_active = 0
         self._count_lock = threading.Lock()
 
-    def separate(self, audio, sample_rate, models):
+    def separate(self, audio, sample_rate, model_set):
         with self._count_lock:
             self._active += 1
             self.max_active = max(self.max_active, self._active)
         try:
             time.sleep(0.03)
-            return super().separate(audio, sample_rate, models)
+            return super().separate(audio, sample_rate, model_set)
         finally:
             with self._count_lock:
                 self._active -= 1
@@ -50,8 +50,8 @@ class GatedSeparator(FakeSeparator):
         with self._entered:
             self._entered.wait_for(lambda: len(self.calls) >= count, timeout=10)
 
-    def separate(self, audio, sample_rate, models):
-        separation = super().separate(audio, sample_rate, models)
+    def separate(self, audio, sample_rate, model_set):
+        separation = super().separate(audio, sample_rate, model_set)
         with self._entered:
             number = len(self.calls)
             self._entered.notify_all()
@@ -137,7 +137,7 @@ class RunBatchTest(BatchTestBase):
     def _run(self, sources, separator, parallel=2, report=None):
         return run_batch(
             sources, parallel=parallel, report=report or (lambda result: None),
-            library=self.library, separator=separator, models=("m",), naming=Naming(),
+            library=self.library, separator=separator, model_set="m", naming=Naming(),
             allow_long=False, sleep=lambda seconds: None)
 
     def test_batch_continues_after_a_failure(self):
@@ -152,11 +152,11 @@ class RunBatchTest(BatchTestBase):
         sources = [self._flac("a.flac"), self._flac("b.flac"), self._flac("c.flac")]
 
         class BrokenOnB(FakeSeparator):
-            def separate(self, audio, sample_rate, models):
+            def separate(self, audio, sample_rate, model_set):
                 if len(self.calls) == 1:
-                    self.calls.append((0, models))
+                    self.calls.append((0, model_set))
                     raise ValueError("odd")
-                return super().separate(audio, sample_rate, models)
+                return super().separate(audio, sample_rate, model_set)
 
         summary = self._run(sources, BrokenOnB(), parallel=1)
         self.assertEqual((summary.done, summary.failed), (2, 1))
@@ -192,7 +192,7 @@ class RunBatchTest(BatchTestBase):
 
         summary = run_batch(
             sources, parallel=1, report=interrupt_on_first, on_stopping=on_stopping,
-            library=self.library, separator=separator, models=("m",), naming=Naming(),
+            library=self.library, separator=separator, model_set="m", naming=Naming(),
             allow_long=False, sleep=lambda seconds: None)
         self.assertEqual(stopping, [1])
         self.assertEqual([r.source for r in reported], sources[:2])
@@ -231,7 +231,7 @@ class RunBatchTest(BatchTestBase):
             summary = run_batch(
                 sources, parallel=1, report=interrupt_on_first, cancel=cancel,
                 on_stopping=stopping.append, on_abandoning=abandoning.append,
-                library=self.library, separator=separator, models=("m",), naming=Naming(),
+                library=self.library, separator=separator, model_set="m", naming=Naming(),
                 allow_long=False, sleep=lambda seconds: None)
         self.assertTrue(cancel.is_set())
         self.assertEqual((stopping, abandoning), ([1], [1]))

@@ -44,7 +44,7 @@ def _raises(error):
     return behaviour
 
 
-def _quarter_split(upload, models):
+def _quarter_split(upload, model_set):
     mix, rate = transport.decode_upload(upload)
     stems = np.stack([0.25 * mix] * 4).astype(np.float32)
     return transport.encode_result(stems, 12.5, "NVIDIA A10", 44100,
@@ -116,11 +116,11 @@ class SeparateTest(unittest.TestCase):
         lookup = _Lookup({"separate": remote})
         separator = ModalSeparator(lookup=lookup, token_present=lambda: True)
         mix = fakes.test_signal(0.5)
-        result = separator.separate(mix, 44100, ("scnet_xl_ihf", "bs_roformer_ep17"))
+        result = separator.separate(mix, 44100, "ensemble4")
         self.assertEqual(lookup.names, [(APP_NAME, "separate")])
-        upload, models = remote.calls[0]
+        upload, model_set = remote.calls[0]
         self.assertIsInstance(upload, bytes)
-        self.assertEqual(models, ["scnet_xl_ihf", "bs_roformer_ep17"])
+        self.assertEqual(model_set, "ensemble4")
         self.assertEqual(result.stems.shape, (4,) + mix.shape)
         self.assertEqual(result.sample_rate, 44100)
         self.assertEqual(result.gpu, "NVIDIA A10")
@@ -132,21 +132,21 @@ class SeparateTest(unittest.TestCase):
         lookup = _Lookup({"separate": _Remote(_raises(ModalTimeoutError("slow")))})
         separator = ModalSeparator(lookup=lookup, token_present=lambda: True)
         with self.assertRaises(SeparatorError) as caught:
-            separator.separate(fakes.test_signal(0.1), 44100, ("scnet_xl_ihf",))
+            separator.separate(fakes.test_signal(0.1), 44100, "specialist")
         self.assertTrue(caught.exception.transient)
 
     def test_separate_lets_a_malformed_result_fail_permanently(self):
-        lookup = _Lookup({"separate": _Remote(lambda upload, models: {"shape": [1]})})
+        lookup = _Lookup({"separate": _Remote(lambda upload, model_set: {"shape": [1]})})
         separator = ModalSeparator(lookup=lookup, token_present=lambda: True)
         with self.assertRaises(SeparatorError) as caught:
-            separator.separate(fakes.test_signal(0.1), 44100, ("scnet_xl_ihf",))
+            separator.separate(fakes.test_signal(0.1), 44100, "specialist")
         self.assertFalse(caught.exception.transient)
 
     def test_separate_turns_an_upload_that_cannot_be_encoded_into_a_permanent_error(self):
         separator = ModalSeparator(lookup=_refuse_lookup, token_present=lambda: True)
         with mock.patch.object(transport, "encode_upload", side_effect=RuntimeError("no space")):
             with self.assertRaises(SeparatorError) as caught:
-                separator.separate(fakes.test_signal(0.1), 44100, ("scnet_xl_ihf",))
+                separator.separate(fakes.test_signal(0.1), 44100, "specialist")
         self.assertFalse(caught.exception.transient)
         self.assertIn("no space", str(caught.exception))
 

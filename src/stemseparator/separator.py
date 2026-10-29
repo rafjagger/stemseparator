@@ -30,5 +30,5 @@ class Separator(Protocol):
     def preflight(self) -> None: ...
 
     def separate(
-        self, audio: np.ndarray, sample_rate: int, models: tuple[str, ...]
+        self, audio: np.ndarray, sample_rate: int, model_set: str
     ) -> Separation: ...

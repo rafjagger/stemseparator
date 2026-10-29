@@ -18,7 +18,7 @@ from stemseparator.staging import staging_root
 from tests import fakes
 from tests.fakes import FakeSeparator
 
-MODELS = ("m",)
+MODEL_SET = "m"
 
 
 def no_sleep(seconds):
@@ -45,7 +45,7 @@ class PipelineTest(unittest.TestCase):
 
     def _run(self, source, separator=None, naming=Naming(), allow_long=False):
         return process_track(
-            source, library=self.library, separator=separator or FakeSeparator(), models=MODELS,
+            source, library=self.library, separator=separator or FakeSeparator(), model_set=MODEL_SET,
             naming=naming, allow_long=allow_long, sleep=no_sleep)
 
     def _library_files(self):
@@ -138,7 +138,7 @@ class PipelineTest(unittest.TestCase):
     def test_transient_error_retried_twice_then_fails(self):
         fake = FakeSeparator(fail_times=3)
         sleeps = []
-        result = process_track(self._source(), library=self.library, separator=fake, models=MODELS,
+        result = process_track(self._source(), library=self.library, separator=fake, model_set=MODEL_SET,
                                naming=Naming(), allow_long=False, sleep=sleeps.append)
         self.assertFalse(result.ok)
         self.assertEqual(result.reason, "boom")
@@ -178,13 +178,13 @@ class PipelineTest(unittest.TestCase):
         cancel = threading.Event()
 
         class CancelWhileRunning(FakeSeparator):
-            def separate(self, audio, sample_rate, models):
-                separation = super().separate(audio, sample_rate, models)
+            def separate(self, audio, sample_rate, model_set):
+                separation = super().separate(audio, sample_rate, model_set)
                 cancel.set()  # the second Ctrl-C arrives while the GPU call runs
                 return separation
 
         result = process_track(self._source(), library=self.library,
-                               separator=CancelWhileRunning(), models=MODELS, naming=Naming(),
+                               separator=CancelWhileRunning(), model_set=MODEL_SET, naming=Naming(),
                                allow_long=False, sleep=no_sleep, cancel=cancel)
         self.assertFalse(result.ok)
         self.assertIn("abandoned", result.reason)
@@ -195,7 +195,7 @@ class PipelineTest(unittest.TestCase):
         cancel.set()
         fake = FakeSeparator()
         result = process_track(self._source(), library=self.library, separator=fake,
-                               models=MODELS, naming=Naming(), allow_long=False,
+                               model_set=MODEL_SET, naming=Naming(), allow_long=False,
                                sleep=no_sleep, cancel=cancel)
         self.assertFalse(result.ok)
         self.assertEqual(fake.calls, [])
@@ -209,8 +209,8 @@ class PipelineTest(unittest.TestCase):
 
     def test_wrong_rate_from_separator_fails(self):
         class Wrong(FakeSeparator):
-            def separate(self, audio, sample_rate, models):
-                good = super().separate(audio, sample_rate, models)
+            def separate(self, audio, sample_rate, model_set):
+                good = super().separate(audio, sample_rate, model_set)
                 return dataclasses.replace(good, sample_rate=48000)
 
         result = self._run(self._source(), Wrong())
@@ -220,8 +220,8 @@ class PipelineTest(unittest.TestCase):
 
     def _reshaping_separator(self, reshape):
         class Reshaped(FakeSeparator):
-            def separate(self, audio, sample_rate, models):
-                good = super().separate(audio, sample_rate, models)
+            def separate(self, audio, sample_rate, model_set):
+                good = super().separate(audio, sample_rate, model_set)
                 return dataclasses.replace(good, stems=reshape(good.stems))
         return Reshaped()
 

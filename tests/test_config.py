@@ -20,16 +20,22 @@ class LoadConfigTest(unittest.TestCase):
         config = load_config(self.path)
         self.assertEqual(config, Config())
         self.assertEqual(config.library, Path("~/Music/stems").expanduser())
-        self.assertEqual(config.models, ("scnet_xl_ihf", "bs_roformer_ep17"))
+        self.assertEqual(config.models, "specialist")
         self.assertEqual(config.parallel, 4)
 
     def test_library_expands_tilde(self):
         self.write('library = "~/x"\n')
         self.assertEqual(load_config(self.path).library, Path("~/x").expanduser())
 
-    def test_models_become_tuple(self):
-        self.write('models = ["bs_roformer_ep17"]\n')
-        self.assertEqual(load_config(self.path).models, ("bs_roformer_ep17",))
+    def test_models_names_a_model_set(self):
+        self.write('models = "ensemble4"\n')
+        self.assertEqual(load_config(self.path).models, "ensemble4")
+
+    def test_a_list_of_models_is_refused_with_the_new_form(self):
+        self.write('models = ["scnet_xl_ihf", "bs_roformer_ep17"]\n')
+        with self.assertRaises(ConfigError) as ctx:
+            load_config(self.path)
+        self.assertIn('models = "specialist"', str(ctx.exception))
 
     def test_parallel_is_read(self):
         self.write("parallel = 2\n")
@@ -47,8 +53,8 @@ class LoadConfigTest(unittest.TestCase):
             load_config(self.path)
 
     def test_wrong_types_are_refused(self):
-        for text in ('parallel = "4"\n', 'models = "x"\n', "library = 3\n",
-                     "models = [1]\n", "parallel = true\n"):
+        for text in ('parallel = "4"\n', 'models = ""\n', "library = 3\n",
+                     "models = 1\n", "parallel = true\n"):
             with self.subTest(text=text):
                 self.write(text)
                 with self.assertRaises(ConfigError):

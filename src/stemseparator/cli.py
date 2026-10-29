@@ -13,7 +13,7 @@ from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_
 from stemseparator.layout import plan_track
 from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
-from stemseparator.remote.registry import MODELS
+from stemseparator.remote.registry import MODEL_SETS
 from stemseparator.separator import Separator, SeparatorUnavailable
 from stemseparator.staging import StagedSet, StagingError
 
@@ -57,20 +57,27 @@ def _build_parser(err: TextIO) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true",
                         help="show names and cost estimate, write and upload nothing")
     parser.add_argument("--long", action="store_true", help="allow tracks longer than 20 min")
+    parser.add_argument("--models", metavar="SET",
+                        help=f"model set, overrides the config ({', '.join(MODEL_SETS)})")
     return parser
 
 
-def _load_settings(args, config_path: Path, known_models: frozenset[str] | None) -> Config:
+def _check_model_set(name: str, origin: str, known_sets: frozenset[str] | None) -> None:
+    if known_sets is None or name in known_sets:
+        return
+    raise ConfigError(f"unknown model set '{name}' {origin} "
+                      f"(known: {', '.join(sorted(known_sets))})")
+
+
+def _load_settings(args, config_path: Path, known_sets: frozenset[str] | None) -> Config:
     config = load_config(config_path)
-    unknown = [name for name in config.models if known_models is not None
-               and name not in known_models]
-    if unknown:
-        raise ConfigError(f"unknown model(s) {', '.join(unknown)} in {config_path} "
-                          f"(known: {', '.join(sorted(known_models))})")
-    if args.library is None:
-        return config
-    return Config(library=args.library.expanduser(), models=config.models,
-                  parallel=config.parallel)
+    if args.models is not None:
+        _check_model_set(args.models, "given with --models", known_sets)
+    else:
+        _check_model_set(config.models, f"in {config_path}", known_sets)
+    library = config.library if args.library is None else args.library.expanduser()
+    models = config.models if args.models is None else args.models
+    return Config(library=library, models=models, parallel=config.parallel)
 
 
 def _print_failed(failed: list[TrackResult], out: TextIO) -> None:
@@ -203,10 +210,11 @@ def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -
         print(f"error: {error}", file=err)
         return EXIT_USAGE
     at_once = min(config.parallel, len(sources))
-    print(f"separating {len(sources)} track(s), up to {at_once} at a time…", file=out, flush=True)
+    print(f"separating {len(sources)} track(s) with {config.models}, up to {at_once} at a time…",
+          file=out, flush=True)
     summary = run_batch(sources, parallel=config.parallel, report=_make_reporter(len(sources), out),
                         on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
-                        library=config.library, separator=separator, models=config.models,
+                        library=config.library, separator=separator, model_set=config.models,
                         naming=naming, allow_long=allow_long)
     _print_summary(summary, refused, out)
     if summary.interrupted:
@@ -223,7 +231,7 @@ def _default_separator_factory() -> Separator:
 
 def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None = None,
          config_path: Path = DEFAULT_CONFIG_PATH,
-         known_models: frozenset[str] | None = frozenset(MODELS),
+         known_sets: frozenset[str] | None = frozenset(MODEL_SETS),
          out: TextIO = sys.stdout, err: TextIO = sys.stderr) -> int:
     parser = _build_parser(err)
     try:
@@ -231,7 +239,7 @@ def main(argv: list[str], *, separator_factory: Callable[[], Separator] | None =
     except SystemExit as stop:
         return int(stop.code or 0)
     try:
-        config = _load_settings(args, config_path, known_models)
+        config = _load_settings(args, config_path, known_sets)
     except ConfigError as error:
         print(f"error: {error}", file=err)
         return EXIT_USAGE

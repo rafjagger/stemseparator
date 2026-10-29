@@ -18,8 +18,8 @@ class CostTest(unittest.TestCase):
             self.assertEqual(cost.cost_usd(2.0, "NVIDIA A100"), 10.0)
             self.assertEqual(cost.cost_usd(2.0, "NVIDIA A10"), 2.0)
 
-    def test_estimate_scales_with_models(self):
-        one = cost.estimate_usd(100.0, ("m1",))
-        two = cost.estimate_usd(100.0, ("m1", "m2"))
-        self.assertAlmostEqual(one, 100.0 * cost.GPU_SECONDS_PER_AUDIO_SECOND * 0.000306)
-        self.assertAlmostEqual(two, 2 * one)
+    def test_estimate_counts_the_checkpoints_a_model_set_runs(self):
+        per_run = 100.0 * cost.GPU_SECONDS_PER_AUDIO_SECOND * 0.000306
+        self.assertAlmostEqual(cost.estimate_usd(100.0, "specialist"), 2 * per_run)
+        self.assertAlmostEqual(cost.estimate_usd(100.0, "ensemble4"), 2 * per_run)
+        self.assertAlmostEqual(cost.estimate_usd(100.0, "htdemucs_ft"), 4 * per_run)

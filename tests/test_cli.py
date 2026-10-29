@@ -27,7 +27,7 @@ class CliTest(unittest.TestCase):
         self.inbox = self.root / "in"
         self.inbox.mkdir()
         self.config_path = self.root / "config.toml"
-        self._write_config(f'library = "{self.library}"\nmodels = ["m1"]\nparallel = 2\n')
+        self._write_config(f'library = "{self.library}"\nmodels = "specialist"\nparallel = 2\n')
         self.out, self.err = io.StringIO(), io.StringIO()
 
     def _write_config(self, text):
@@ -39,10 +39,10 @@ class CliTest(unittest.TestCase):
             handle.write(fakes.test_signal(seconds))
         return path
 
-    def _main(self, *argv, separator=None, known_models=None):
+    def _main(self, *argv, separator=None, known_sets=None):
         factory = (lambda: separator) if separator is not None else refuse_factory
         return cli.main([str(a) for a in argv], separator_factory=factory,
-                        config_path=self.config_path, known_models=known_models,
+                        config_path=self.config_path, known_sets=known_sets,
                         out=self.out, err=self.err)
 
     def _library_files(self):
@@ -78,7 +78,7 @@ class CliTest(unittest.TestCase):
         code = self._main(*sources, separator=FakeSeparator())
         self.assertEqual(code, 0, self.err.getvalue())
         first_line = self.out.getvalue().splitlines()[0]
-        self.assertEqual(first_line, "separating 3 track(s), up to 2 at a time…")
+        self.assertEqual(first_line, "separating 3 track(s) with specialist, up to 2 at a time…")
 
     def test_one_failure_exits_1_and_lists_reason(self):
         good = self._source("good.flac")
@@ -154,22 +154,48 @@ class CliTest(unittest.TestCase):
 
     def test_unknown_model_in_config_exits_2(self):
         source = self._source()
-        code = self._main(source, known_models=frozenset({"other"}))
+        code = self._main(source, known_sets=frozenset({"other"}))
         self.assertEqual(code, 2)
-        self.assertIn("m1", self.err.getvalue())
+        self.assertIn("specialist", self.err.getvalue())
 
-    def test_default_known_models_are_the_registry(self):
+    def test_default_known_sets_are_the_registry(self):
+        self._write_config(f'library = "{self.library}"\nmodels = "m1"\n')
         code = cli.main([str(self._source())], separator_factory=refuse_factory,
                         config_path=self.config_path, out=self.out, err=self.err)
         self.assertEqual(code, 2)
         self.assertIn("m1", self.err.getvalue())
-        self.assertIn("scnet_xl_ihf", self.err.getvalue())
+        self.assertIn("specialist", self.err.getvalue())
+        self.assertIn("ensemble4", self.err.getvalue())
+
+    def test_models_flag_overrides_the_config_and_reaches_the_separator(self):
+        separator = FakeSeparator()
+        code = cli.main(["--models", "ensemble4", str(self._source())],
+                        separator_factory=lambda: separator, config_path=self.config_path,
+                        out=self.out, err=self.err)
+        self.assertEqual(code, 0, self.err.getvalue())
+        self.assertEqual([model_set for _, model_set in separator.calls], ["ensemble4"])
+
+    def test_without_models_flag_or_config_entry_the_default_set_runs(self):
+        self._write_config(f'library = "{self.library}"\n')
+        separator = FakeSeparator()
+        code = cli.main([str(self._source())], separator_factory=lambda: separator,
+                        config_path=self.config_path, out=self.out, err=self.err)
+        self.assertEqual(code, 0, self.err.getvalue())
+        self.assertEqual([model_set for _, model_set in separator.calls], ["specialist"])
+
+    def test_unknown_models_flag_exits_2_and_names_the_sets(self):
+        code = cli.main(["--models", "best", str(self._source())],
+                        separator_factory=refuse_factory, config_path=self.config_path,
+                        out=self.out, err=self.err)
+        self.assertEqual(code, 2)
+        self.assertIn("best", self.err.getvalue())
+        self.assertIn("specialist", self.err.getvalue())
 
     def test_separator_that_cannot_be_built_exits_2_without_traceback(self):
         def broken_factory():
             raise ImportError("No module named 'modal'")
         code = cli.main([str(self._source())], separator_factory=broken_factory,
-                        config_path=self.config_path, known_models=None,
+                        config_path=self.config_path, known_sets=None,
                         out=self.out, err=self.err)
         self.assertEqual(code, 2)
         self.assertIn("No module named 'modal'", self.err.getvalue())
