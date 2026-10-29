@@ -4,6 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from stemseparator.naming import DEFAULT_OUTPUT_FORMAT, OUTPUT_FORMATS
 from stemseparator.remote.registry import DEFAULT_MODEL_SET
 
 
@@ -12,6 +13,7 @@ class Config:
     library: Path = Path("~/Music/stems").expanduser()
     models: str = DEFAULT_MODEL_SET  # the name of a model set in the registry
     parallel: int = 4
+    format: str = DEFAULT_OUTPUT_FORMAT  # of the stem files: flac or wav
 
 
 class ConfigError(Exception):
@@ -19,7 +21,7 @@ class ConfigError(Exception):
 
 
 DEFAULT_CONFIG_PATH = Path("~/.config/stemseparator/config.toml").expanduser()
-_KNOWN_KEYS = ("library", "models", "parallel")
+_KNOWN_KEYS = ("library", "models", "parallel", "format")
 
 
 def _read_table(path: Path) -> dict:
@@ -62,6 +64,12 @@ def _parallel(value, path: Path) -> int:
     return value
 
 
+def _format(value, path: Path) -> str:
+    if value not in OUTPUT_FORMATS:
+        raise ConfigError(f"'format' in {path} must be one of {', '.join(OUTPUT_FORMATS)}")
+    return value
+
+
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     table = _read_table(path)
     _check_keys(table, path)
@@ -70,4 +78,5 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         library=_library(table["library"], path) if "library" in table else defaults.library,
         models=_models(table["models"], path) if "models" in table else defaults.models,
         parallel=_parallel(table["parallel"], path) if "parallel" in table else defaults.parallel,
+        format=_format(table["format"], path) if "format" in table else defaults.format,
     )

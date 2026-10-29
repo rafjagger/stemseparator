@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from stemseparator.layout import ORIGINALS_DIR, TrackPlan
-from stemseparator.naming import STEM_NAMES
+from stemseparator.naming import DEFAULT_OUTPUT_FORMAT, STEM_NAMES
 
 STAGING_DIR_NAME = ".stemseparator-staging"
 
@@ -29,7 +29,7 @@ def staging_root(library: Path) -> Path:
 
 
 class StagedSet:
-    def __init__(self, library: Path):
+    def __init__(self, library: Path, extension: str = DEFAULT_OUTPUT_FORMAT):
         library.mkdir(parents=True, exist_ok=True)
         self._root = staging_root(library)
         self._job = self._root / str(uuid.uuid4())
@@ -40,7 +40,9 @@ class StagedSet:
         except BaseException:
             self._remove()
             raise
-        self.stem_paths = tuple(self._job / f"{n}.wav" for n in range(1, len(STEM_NAMES) + 1))
+        # The suffix chooses the encoder (write_stem_24bit).
+        self.stem_paths = tuple(self._job / f"{n}.{extension}"
+                                for n in range(1, len(STEM_NAMES) + 1))
         self.original_path = self._job / "original"
 
     def _require_same_filesystem(self, library: Path) -> None:

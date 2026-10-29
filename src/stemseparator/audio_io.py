@@ -167,7 +167,7 @@ def read_track(path: Path) -> Track:
 
 
 def write_stem_24bit(path: Path, audio: np.ndarray, sample_rate: int) -> int:
-    """Write a 24-bit WAV; returns how many samples had to be clipped."""
+    """Write a 24-bit WAV or FLAC, by the path's suffix; returns how many samples were clipped."""
     clipped = int(np.count_nonzero((audio > MAX_24BIT) | (audio < -1.0)))
     # libsndfile does not clip float to int, it wraps.
     sf.write(path, np.clip(audio, -1.0, MAX_24BIT), sample_rate, subtype="PCM_24")

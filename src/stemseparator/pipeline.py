@@ -17,6 +17,7 @@ from stemseparator.audio_io import (
     AUDIO_SUFFIXES, REFUSED_AUDIO_SUFFIXES, Track, UndecodableError, read_seconds, read_track,
     unsupported_format_message, write_stem_24bit)
 from stemseparator.layout import TrackPlan, is_inside, plan_track
+from stemseparator.naming import DEFAULT_OUTPUT_FORMAT
 from stemseparator.separator import Separation, Separator, SeparatorError
 from stemseparator.staging import StagedSet, commit
 
@@ -89,17 +90,18 @@ def _write_stems(staged: StagedSet, stems: np.ndarray) -> int:
 
 
 def _commit_set(source: Path, library: Path, separation: Separation,
-                names: tuple[str, str, str],
+                names: tuple[str, str, str], output_format: str,
                 cancel: threading.Event | None) -> tuple[TrackPlan, int]:
     artist, album, title = names
-    with StagedSet(library) as staged:
+    with StagedSet(library, output_format) as staged:
         clipped = _write_stems(staged, separation.stems)
         shutil.copy2(source, staged.original_path)
         # Checked as late as possible: writing takes seconds, the rename does not.
         if _is_cancelled(cancel):
             raise _Abandoned
         plan = commit(staged, lambda: plan_track(library, artist, album, title, source,
-                                                 stem_names=separation.stem_names))
+                                                 stem_names=separation.stem_names,
+                                                 extension=output_format))
     return plan, clipped
 
 
@@ -134,7 +136,8 @@ def result_problem(track: Track, separation: Separation) -> str | None:
 def process_track(source: Path, *, library: Path, separator: Separator, model_set: str,
                   naming: Naming, allow_long: bool,
                   sleep: Callable[[float], None] = time.sleep,
-                  cancel: threading.Event | None = None) -> TrackResult:
+                  cancel: threading.Event | None = None,
+                  output_format: str = DEFAULT_OUTPUT_FORMAT) -> TrackResult:
     """`cancel` set means the user abandoned the batch: nothing more may land in the library."""
     source = Path(source)
     refusal = refusal_before_decode(source, library, allow_long)
@@ -155,7 +158,7 @@ def process_track(source: Path, *, library: Path, separator: Separator, model_se
         return _failed(source, problem)
     try:
         plan, clipped = _commit_set(source, library, separation, resolve_names(track, naming),
-                                    cancel)
+                                    output_format, cancel)
     except _Abandoned:
         return _failed(source, ABANDONED_REASON)
     except Exception as error:  # the staged set is already gone; the batch continues

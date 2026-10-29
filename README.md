@@ -1,6 +1,6 @@
 # stemseparator
 
-A local command-line tool that sends audio (FLAC, WAV or AIFF) to a rented cloud GPU, separates it into four stems and writes the result as a stem set for StemDeck (44.1 kHz, 24-bit).
+A local command-line tool that sends audio (FLAC, WAV or AIFF) to a rented cloud GPU, separates it into four stems and writes the result as a stem set for StemDeck (44.1 kHz, 24-bit FLAC or WAV).
 
 The separation runs on [Modal](https://modal.com) with models loaded through
 [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training)
@@ -69,15 +69,18 @@ twice (or a folder plus a file inside it) is separated once. Ctrl-C stops starti
 waits for the running ones, whose GPU time is already paid; a second Ctrl-C abandons them, and
 they write nothing.
 
-Further flags: `--title` (single track only), `--library` (overrides the config), `--long` (allow
+Further flags: `--format flac|wav` (overrides the config), `--title` (single track only),
+`--library` (overrides the config), `--long` (allow
 tracks over 20 minutes). Before the first upload the tool checks that a token exists and that the
 app is deployed, and stops with a plain message if not. A failed network or Modal call is retried
 twice; a track that still fails leaves nothing in the library.
 
 - **Input:** FLAC, WAV or AIFF only, mono or stereo, any sample rate.
-- **Output:** always 44.1 kHz, 24-bit WAV (the models run at 44.1 kHz; a 48 kHz track comes back
-  at 44.1 kHz). Per track: `<library>/<Artist>/<Album>/<Title> - 1 - low.wav` … `4 - vocals.wav`
-  (`1 - drums` … `4 - vocals` for the other sets), plus the untouched source under `originals/`.
+- **Output:** always 44.1 kHz, 24-bit, as FLAC by default or WAV with `--format wav` (the models
+  run at 44.1 kHz; a 48 kHz track comes back at 44.1 kHz). StemDeck reads both: FLAC is decoded
+  into memory on load, so seeking is as instant as with WAV. Per track:
+  `<library>/<Artist>/<Album>/<Title> - 1 - low.flac` … `4 - vocals.flac` (`1 - drums` …
+  `4 - vocals` for the other sets), plus the untouched source under `originals/`.
 - GPU seconds and cost per track are approximate: wall time on the GPU times Modal's list price;
   cold starts and idle time are not in it.
 - The `--dry-run` cost is a rough guess: it assumes 0.3 GPU seconds per second of audio and
@@ -94,7 +97,7 @@ stemseparator compare <library>/shootout                  # measure again, new e
 ```
 
 `--shootout` separates one track with every set in `--sets` (up to `parallel` at once) into
-`<library>/shootout/<set>/<Title> - N - <stem>.wav`. `runs.json` there keeps each set's GPU
+`<library>/shootout/<set>/<Title> - N - <stem>.flac` (or `.wav` with `--format wav`). `runs.json` there keeps each set's GPU
 seconds, cost, residual and stem names; a set run again replaces its folder. A shootout folder
 holds one track only: for another track, move it away or give another `--library`. The track may
 lie inside the library, not inside `shootout/`.
@@ -115,6 +118,7 @@ reference stems, so the ear decides.
 library = "~/Music/stems"                       # where stem sets go
 models = "space4"                               # model set: space4, specialist, ensemble4, sw4, space4sw, htdemucs_ft
 parallel = 4                                    # tracks on the GPU at once
+format = "flac"                                 # stem files: flac (default) or wav
 ```
 
 ## Privacy

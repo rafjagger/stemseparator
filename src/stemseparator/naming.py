@@ -7,6 +7,10 @@ STEM_NAMES: tuple[str, ...] = ("drums", "bass", "other", "vocals")
 # Four stems by spatial job, the space4 set: kick + bass, the rest of the kit, the music, the voice.
 SPACE4_NAMES: tuple[str, ...] = ("low", "tops", "music", "vocals")
 
+# Stems are written as 24-bit FLAC or WAV; StemDeck reads both (FLAC decoded into RAM on load).
+OUTPUT_FORMATS: tuple[str, ...] = ("flac", "wav")
+DEFAULT_OUTPUT_FORMAT = "flac"
+
 _TRAILING_SEPARATORS = " -_"
 _REPLACED_CHARACTERS = "/\\\0"
 

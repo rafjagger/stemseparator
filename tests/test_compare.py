@@ -23,7 +23,7 @@ def _tone(hz: float, seconds: float, level: float = 0.25) -> np.ndarray:
 
 def _write(path: Path, audio: np.ndarray) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(path, audio, RATE, subtype="FLOAT")
+    sf.write(path, audio, RATE, subtype="FLOAT" if path.suffix == ".wav" else "PCM_24")
     return path
 
 
@@ -70,6 +70,13 @@ class FindSetTest(unittest.TestCase):
         stems = dict(zip(SPACE4_NAMES, self.fixture.parts.values()))
         folder = self.fixture.write_set("space4", stems, SPACE4_NAMES)
         self.assertEqual(list(compare.find_set(folder)), list(SPACE4_NAMES))
+
+    def test_flac_stems_are_found(self):
+        folder = self.fixture.root / "flacset"
+        for index, stem in enumerate(STEM_NAMES):
+            _write(folder / stem_file_name("Song", index, STEM_NAMES, "flac"),
+                   self.fixture.parts[stem])
+        self.assertEqual([p.suffix for p in compare.find_set(folder).values()], [".flac"] * 4)
 
     def test_a_folder_without_four_stems_raises(self):
         folder = self.fixture.exact()

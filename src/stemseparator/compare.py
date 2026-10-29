@@ -30,6 +30,7 @@ BANDS = {"sub <60": (0.0, 60.0), "low 60-250": (60.0, 250.0), "mid 250-2k": (250
 # Stems that do the same job under another name, compared and played next to each other.
 ALIASES = {"music": "other"}
 _STEM_FILE = re.compile(r" - ([1-4]) - ([a-z]+)$")
+_STEM_SUFFIXES = (".wav", ".flac")
 _FLOOR = 1e-30
 
 
@@ -56,10 +57,11 @@ class PairMeasures:
 
 
 def find_set(folder: Path) -> dict[str, Path]:
-    """The four '<title> - N - name.wav' files below `folder` (originals/ skipped), in bus order."""
+    """The four '<title> - N - name.wav|flac' files below `folder` (originals/ skipped), in bus
+    order."""
     found: dict[int, tuple[str, Path]] = {}
-    for path in sorted(folder.rglob("*.wav")):
-        if "originals" in path.relative_to(folder).parts:
+    for path in sorted(folder.rglob("*")):
+        if path.suffix not in _STEM_SUFFIXES or "originals" in path.relative_to(folder).parts:
             continue
         match = _STEM_FILE.search(path.stem)
         if match is None:

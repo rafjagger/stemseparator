@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from stemseparator import cli, shootout
+from stemseparator import cli, compare, shootout
 from stemseparator.pipeline import Naming
 from stemseparator.remote.registry import MODEL_SETS
 from stemseparator.separator import SeparatorError
@@ -51,11 +51,11 @@ class ShootoutTest(unittest.TestCase):
         sf.write(path, fakes.test_signal(1.0), 44100)
         return path
 
-    def _run(self, sets, separator=None, track=None, naming=Naming()):
+    def _run(self, sets, separator=None, track=None, naming=Naming(), output_format="wav"):
         return shootout.run_shootout(
             track or self.track, list(sets), library=self.library,
             separator=separator or RegistryNamesFake(), naming=naming, parallel=2,
-            allow_long=False, sleep=no_sleep)
+            allow_long=False, sleep=no_sleep, output_format=output_format)
 
     def _folder(self, set_name):
         return self.library / shootout.SHOOTOUT_DIR / set_name
@@ -72,6 +72,12 @@ class ShootoutTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self._folder("specialist").iterdir()),
                          ["Big Party - 1 - drums.wav", "Big Party - 2 - bass.wav",
                           "Big Party - 3 - other.wav", "Big Party - 4 - vocals.wav"])
+
+    def test_flac_sets_are_written_and_compared_like_wav(self):
+        self._run(["specialist", "space4"], output_format="flac")
+        self.assertEqual(sorted(p.suffix for p in self._folder("space4").iterdir()), [".flac"] * 4)
+        report = compare.run_compare(self.library / shootout.SHOOTOUT_DIR, out=io.StringIO())
+        self.assertIn("space4", report.read_text())
 
     def test_every_set_is_separated_once_with_its_name(self):
         separator = RegistryNamesFake()

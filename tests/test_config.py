@@ -37,6 +37,19 @@ class LoadConfigTest(unittest.TestCase):
             load_config(self.path)
         self.assertIn('models = "space4"', str(ctx.exception))
 
+    def test_format_is_flac_unless_set_to_wav(self):
+        self.assertEqual(load_config(self.path).format, "flac")
+        self.write('format = "wav"\n')
+        self.assertEqual(load_config(self.path).format, "wav")
+
+    def test_an_unknown_format_is_refused(self):
+        for text in ('format = "mp3"\n', "format = 1\n"):
+            with self.subTest(text=text):
+                self.write(text)
+                with self.assertRaises(ConfigError) as ctx:
+                    load_config(self.path)
+                self.assertIn("flac", str(ctx.exception))
+
     def test_parallel_is_read(self):
         self.write("parallel = 2\n")
         self.assertEqual(load_config(self.path).parallel, 2)

@@ -11,7 +11,7 @@ from stemseparator import compare, cost, pipeline, shootout
 from stemseparator.audio_io import UndecodableError, read_track
 from stemseparator.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 from stemseparator.layout import plan_track
-from stemseparator.naming import STEM_NAMES
+from stemseparator.naming import OUTPUT_FORMATS, STEM_NAMES
 from stemseparator.pipeline import (
     SUM_WARN_DB, BatchSummary, Naming, TrackResult, collect_inputs, resolve_names, run_batch)
 from stemseparator.remote.registry import MODEL_SETS
@@ -59,6 +59,8 @@ def _build_parser(err: TextIO) -> argparse.ArgumentParser:
     parser.add_argument("--long", action="store_true", help="allow tracks longer than 20 min")
     parser.add_argument("--models", metavar="SET",
                         help=f"model set, overrides the config ({', '.join(MODEL_SETS)})")
+    parser.add_argument("--format", choices=OUTPUT_FORMATS,
+                        help="stem files as 24-bit FLAC or WAV, overrides the config (default flac)")
     parser.add_argument("--shootout", metavar="TRACK", type=Path,
                         help="separate one track with every set in --sets, into "
                              "<library>/shootout/<set>/, and compare them")
@@ -92,7 +94,8 @@ def _load_settings(args, config_path: Path, known_sets: frozenset[str] | None) -
         _check_model_set(config.models, f"in {config_path}", known_sets)
     library = config.library if args.library is None else args.library.expanduser()
     models = config.models if args.models is None else args.models
-    return Config(library=library, models=models, parallel=config.parallel)
+    output_format = config.format if args.format is None else args.format
+    return Config(library=library, models=models, parallel=config.parallel, format=output_format)
 
 
 def _print_failed(failed: list[TrackResult], out: TextIO) -> None:
@@ -120,7 +123,7 @@ def _dry_run_line(source: Path, config: Config, naming: Naming,
         return f"{source} → failed: {error}", 0.0, str(error)
     artist, album, title = resolve_names(track, naming)
     plan = plan_track(config.library, artist, album, title, source,
-                      stem_names=_stem_names(config.models))
+                      stem_names=_stem_names(config.models), extension=config.format)
     first_stem = plan.stem_paths[0].relative_to(config.library)
     estimate = cost.estimate_usd(track.seconds, config.models)
     detail = f"{format_duration(track.seconds)}, {format_cost(estimate)}"
@@ -228,7 +231,7 @@ def _real_run(sources, refused, config, naming, allow_long, factory, out, err) -
     summary = run_batch(sources, parallel=config.parallel, report=_make_reporter(len(sources), out),
                         on_stopping=_stopping_notice(err), on_abandoning=_abandoning_notice(err),
                         library=config.library, separator=separator, model_set=config.models,
-                        naming=naming, allow_long=allow_long)
+                        naming=naming, allow_long=allow_long, output_format=config.format)
     _print_summary(summary, refused, out)
     if summary.interrupted:
         print(INTERRUPTED_LINE, file=err)
@@ -306,7 +309,8 @@ def _shootout_run(track: Path, sets: list[str], config: Config, naming: Naming,
     try:
         runs = shootout.run_shootout(track, sets, library=config.library, separator=separator,
                                      naming=naming, parallel=config.parallel,
-                                     allow_long=allow_long, report=_report_set(out))
+                                     allow_long=allow_long, report=_report_set(out),
+                                     output_format=config.format)
     except shootout.ShootoutError as error:
         return _usage(str(error), err)
     gpu_seconds = sum(run.gpu_seconds for run in runs)

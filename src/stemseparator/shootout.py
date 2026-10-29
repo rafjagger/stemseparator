@@ -20,7 +20,7 @@ from stemseparator.audio_io import Track, UndecodableError, read_seconds, read_t
     write_stem_24bit
 from stemseparator.compare import RUNS_FILE
 from stemseparator.layout import is_inside
-from stemseparator.naming import sanitise_name, stem_file_name
+from stemseparator.naming import DEFAULT_OUTPUT_FORMAT, sanitise_name, stem_file_name
 from stemseparator.pipeline import (
     MAX_SECONDS, OUTPUT_SAMPLE_RATE, Naming, resolve_names, result_problem, separate_with_retries)
 from stemseparator.separator import Separation, Separator, SeparatorError
@@ -79,15 +79,17 @@ def _check_same_track(runs: dict, source: Path, folder: Path) -> None:
                         "--library")
 
 
-def _write_set(folder: Path, set_name: str, title: str, separation: Separation) -> tuple[Path, int]:
+def _write_set(folder: Path, set_name: str, title: str, separation: Separation,
+               output_format: str) -> tuple[Path, int]:
     partial = folder / f"{_PARTIAL_PREFIX}{set_name}"
     target = folder / set_name
     shutil.rmtree(partial, ignore_errors=True)
     partial.mkdir(parents=True)
     try:
         clipped = sum(
-            write_stem_24bit(partial / stem_file_name(title, index, separation.stem_names), stem,
-                             OUTPUT_SAMPLE_RATE)
+            write_stem_24bit(
+                partial / stem_file_name(title, index, separation.stem_names, output_format),
+                stem, OUTPUT_SAMPLE_RATE)
             for index, stem in enumerate(separation.stems))
         shutil.rmtree(target, ignore_errors=True)
         partial.rename(target)
@@ -98,7 +100,7 @@ def _write_set(folder: Path, set_name: str, title: str, separation: Separation) 
 
 
 def _run_set(set_name: str, track: Track, title: str, folder: Path, separator: Separator,
-             sleep: Callable[[float], None]) -> SetRun:
+             sleep: Callable[[float], None], output_format: str) -> SetRun:
     """Returns no audio: a finished future would otherwise hold every set's stems."""
     try:
         separation = separate_with_retries(track, separator, set_name, sleep)
@@ -109,7 +111,7 @@ def _run_set(set_name: str, track: Track, title: str, folder: Path, separator: S
         return SetRun(set_name, ok=False, reason=problem, gpu_seconds=separation.gpu_seconds,
                       gpu=separation.gpu)
     try:
-        target, clipped = _write_set(folder, set_name, title, separation)
+        target, clipped = _write_set(folder, set_name, title, separation, output_format)
     except OSError as error:
         return SetRun(set_name, ok=False, reason=f"could not write the set: {error}",
                       gpu_seconds=separation.gpu_seconds, gpu=separation.gpu)
@@ -142,7 +144,8 @@ def _write_runs(folder: Path, source: Path, title: str, sets: dict, order: list[
 def run_shootout(source: Path, set_names: list[str], *, library: Path, separator: Separator,
                  naming: Naming, parallel: int, allow_long: bool,
                  sleep: Callable[[float], None] = time.sleep,
-                 report: Callable[[SetRun], None] = lambda run: None) -> list[SetRun]:
+                 report: Callable[[SetRun], None] = lambda run: None,
+                 output_format: str = DEFAULT_OUTPUT_FORMAT) -> list[SetRun]:
     """Separates `source` with every set, up to `parallel` at once; returns the runs in set order."""
     source = Path(source)
     folder = shootout_dir(library)
@@ -158,7 +161,8 @@ def run_shootout(source: Path, set_names: list[str], *, library: Path, separator
     entries = dict(runs.get("sets", {}))
     finished: dict[str, SetRun] = {}
     with ThreadPoolExecutor(max_workers=max(1, min(parallel, len(set_names)))) as executor:
-        futures = [executor.submit(_run_set, name, track, title, folder, separator, sleep)
+        futures = [executor.submit(_run_set, name, track, title, folder, separator, sleep,
+                                   output_format)
                    for name in set_names]
         for future in as_completed(futures):
             run = future.result()

@@ -54,7 +54,7 @@ class CliTest(unittest.TestCase):
                           source)
         self.assertEqual(code, 0)
         text = self.out.getvalue()
-        self.assertIn("Ann/Rec/Tune - 1 - drums.wav", text)
+        self.assertIn("Ann/Rec/Tune - 1 - drums.flac", text)
         self.assertIn("4:12", text)
         self.assertIn("~$", text)
         self.assertEqual(self._library_files(), [])
@@ -64,7 +64,29 @@ class CliTest(unittest.TestCase):
         code = self._main("--dry-run", "--models", "space4", "--artist", "Ann", "--album", "Rec",
                           "--title", "Tune", source)
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertIn("Ann/Rec/Tune - 1 - low.wav", self.out.getvalue())
+        self.assertIn("Ann/Rec/Tune - 1 - low.flac", self.out.getvalue())
+
+    def test_stems_are_flac_by_default(self):
+        self._write_config(f'library = "{self.library}"\n')
+        code = self._main(self._source(), separator=FakeSeparator())
+        self.assertEqual(code, 0, self.err.getvalue())
+        stems = [p for p in self._library_files() if "originals" not in p.parts]
+        self.assertEqual(sorted(p.suffix for p in stems), [".flac"] * 4)
+
+    def test_format_flag_writes_wav_and_overrides_the_config(self):
+        self._write_config(f'library = "{self.library}"\nformat = "flac"\n')
+        code = self._main("--format", "wav", self._source(), separator=FakeSeparator())
+        self.assertEqual(code, 0, self.err.getvalue())
+        stems = [p for p in self._library_files() if "originals" not in p.parts]
+        self.assertEqual(sorted(p.suffix for p in stems), [".wav"] * 4)
+
+    def test_format_from_the_config_reaches_the_dry_run(self):
+        self._write_config(f'library = "{self.library}"\nformat = "wav"\n')
+        self._main("--dry-run", "--title", "Tune", self._source(seconds=2))
+        self.assertIn("Tune - 1 - low.wav", self.out.getvalue())
+
+    def test_unknown_format_flag_exits_2(self):
+        self.assertEqual(self._main("--format", "mp3", self._source()), 2)
 
     def test_run_writes_sets_and_exits_0(self):
         a, b = self._source("a.flac"), self._source("b.flac")
@@ -73,7 +95,8 @@ class CliTest(unittest.TestCase):
             code = self._main(a, b, separator=separator)
         self.assertEqual(code, 0, self.err.getvalue())
         self.assertEqual(len(separator.calls), 2)
-        self.assertEqual(len([p for p in self._library_files() if p.suffix == ".wav"]), 8)
+        self.assertEqual(len([p for p in self._library_files() if p.suffix == ".flac"
+                              and "originals" not in p.parts]), 8)
         text = self.out.getvalue()
         self.assertIn("[1/2]", text)
         self.assertIn("[2/2]", text)
@@ -218,7 +241,7 @@ class CliTest(unittest.TestCase):
         other = self.root / "other-lib"
         code = self._main("--library", other, self._source(), separator=FakeSeparator())
         self.assertEqual(code, 0, self.err.getvalue())
-        self.assertTrue(any(other.rglob("*.wav")))
+        self.assertTrue(any(other.rglob("*.flac")))
         self.assertFalse(self.library.exists())
 
     def test_long_flag_passes_through(self):

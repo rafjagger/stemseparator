@@ -93,7 +93,7 @@ class StagingTest(unittest.TestCase):
             thread.join(timeout=30)
         self.assertEqual(errors, [])
         self.assertEqual(sorted(p.title for p in plans), ["Intro", "Intro (2)"])
-        stems = [p for p in _files_under(self.library) if p.suffix == ".wav"]
+        stems = [p for p in _files_under(self.library) if p.suffix == ".flac" and "originals" not in p.parts]
         self.assertEqual(len(stems), 8)
         self.assertEqual(len(_files_under(self.library)), 10)
 
