@@ -70,7 +70,7 @@ def _is_cancelled(cancel: threading.Event | None) -> bool:
     return cancel is not None and cancel.is_set()
 
 
-def _separate_with_retries(track: Track, separator: Separator, model_set: str,
+def separate_with_retries(track: Track, separator: Separator, model_set: str,
                            sleep: Callable[[float], None]) -> Separation:
     for attempt in range(ATTEMPTS):
         try:
@@ -116,7 +116,7 @@ def refusal_before_decode(source: Path, library: Path, allow_long: bool) -> str 
     return None
 
 
-def _result_problem(track: Track, separation: Separation) -> str | None:
+def result_problem(track: Track, separation: Separation) -> str | None:
     if separation.sample_rate != OUTPUT_SAMPLE_RATE:
         return (f"separator returned {separation.sample_rate} Hz, "
                 f"expected {OUTPUT_SAMPLE_RATE} Hz")
@@ -147,10 +147,10 @@ def process_track(source: Path, *, library: Path, separator: Separator, model_se
     if _is_cancelled(cancel):
         return _failed(source, ABANDONED_REASON)
     try:
-        separation = _separate_with_retries(track, separator, model_set, sleep)
+        separation = separate_with_retries(track, separator, model_set, sleep)
     except SeparatorError as error:
         return _failed(source, str(error))
-    problem = _result_problem(track, separation)
+    problem = result_problem(track, separation)
     if problem is not None:
         return _failed(source, problem)
     try:
