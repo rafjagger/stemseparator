@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from stemseparator.naming import SPACE4_NAMES, STEM_NAMES
 from stemseparator.separator import SeparatorError
 from stemseparator.transport import decode_result, decode_upload, encode_result, encode_upload
 from tests.fakes import test_signal
@@ -43,6 +44,24 @@ class ResultTest(unittest.TestCase):
         self.assertEqual(separation.gpu, "NVIDIA A10")
         self.assertEqual(separation.sample_rate, 44100)
         self.assertEqual(separation.residual_db, -42.5)
+
+    def test_result_carries_the_stem_names(self):
+        result = encode_result(self._stems(), 1.0, "", 44100, -40.0, SPACE4_NAMES)
+        self.assertEqual(decode_result(result).stem_names, SPACE4_NAMES)
+
+    def test_result_from_an_older_deploy_without_names_is_drums_bass_other_vocals(self):
+        result = encode_result(self._stems(), 1.0, "", 44100, -40.0)
+        del result["stem_names"]
+        self.assertEqual(decode_result(result).stem_names, STEM_NAMES)
+
+    def test_result_with_unusable_stem_names_raises_separator_error(self):
+        for names in (["low", "tops", "music"], ["low", "tops", "../x", "vocals"],
+                      ["low", "low", "music", "vocals"], "lowtopsmusicvocals"):
+            with self.subTest(names=names):
+                result = encode_result(self._stems(), 1.0, "", 44100, -40.0)
+                result["stem_names"] = names
+                with self.assertRaises(SeparatorError):
+                    decode_result(result)
 
     def test_result_roundtrip_carries_minus_infinity(self):
         result = encode_result(self._stems(), 1.0, "", 44100, -np.inf)

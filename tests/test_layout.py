@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from stemseparator.layout import is_inside, plan_track
+from stemseparator.naming import SPACE4_NAMES
 
 
 class PlanTrackTest(unittest.TestCase):
@@ -17,6 +18,13 @@ class PlanTrackTest(unittest.TestCase):
         self.assertEqual(plan.stem_paths[0], album / "Intro - 1 - drums.wav")
         self.assertEqual(plan.stem_paths[3], album / "Intro - 4 - vocals.wav")
         self.assertEqual(plan.original_path, album / "originals" / "Intro.FLAC")
+
+    def test_plan_paths_carry_the_sets_stem_names(self):
+        plan = plan_track(Path("/lib"), "A", "B", "Intro", Path("/in/x.flac"),
+                          exists=lambda p: False, stem_names=SPACE4_NAMES)
+        self.assertEqual([p.name for p in plan.stem_paths],
+                         ["Intro - 1 - low.wav", "Intro - 2 - tops.wav",
+                          "Intro - 3 - music.wav", "Intro - 4 - vocals.wav"])
 
     def test_empty_names_use_fallbacks(self):
         plan = plan_track(Path("/lib"), "", "", "", Path("/in/x.wav"),

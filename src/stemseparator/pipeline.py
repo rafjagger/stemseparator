@@ -98,7 +98,8 @@ def _commit_set(source: Path, library: Path, separation: Separation,
         # Checked as late as possible: writing takes seconds, the rename does not.
         if _is_cancelled(cancel):
             raise _Abandoned
-        plan = commit(staged, lambda: plan_track(library, artist, album, title, source))
+        plan = commit(staged, lambda: plan_track(library, artist, album, title, source,
+                                                 stem_names=separation.stem_names))
     return plan, clipped
 
 

@@ -4,6 +4,8 @@
 
 # Demucs' own order and NI Stems': bus 1 is drums.
 STEM_NAMES: tuple[str, ...] = ("drums", "bass", "other", "vocals")
+# Four stems by spatial job, the space4 set: kick + bass, the rest of the kit, the music, the voice.
+SPACE4_NAMES: tuple[str, ...] = ("low", "tops", "music", "vocals")
 
 _TRAILING_SEPARATORS = " -_"
 _REPLACED_CHARACTERS = "/\\\0"
@@ -17,5 +19,6 @@ def sanitise_name(name: str, fallback: str) -> str:
     return fallback if clean.strip("_ ") == "" else clean
 
 
-def stem_file_name(title: str, stem: int, extension: str = "wav") -> str:
-    return f"{title} - {stem + 1} - {STEM_NAMES[stem]}.{extension}"
+def stem_file_name(title: str, stem: int, names: tuple[str, ...] = STEM_NAMES,
+                   extension: str = "wav") -> str:
+    return f"{title} - {stem + 1} - {names[stem]}.{extension}"

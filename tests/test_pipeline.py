@@ -73,6 +73,15 @@ class PipelineTest(unittest.TestCase):
         self.assertLessEqual(float(np.max(np.abs(total - sf.read(source, dtype="float64")[0]))), 2**-22)
         self.assertLess(result.residual_db, -100)
 
+    def test_files_are_named_after_the_stems_the_separator_returned(self):
+        fake = FakeSeparator(stem_names=("low", "tops", "music", "vocals"))
+        result = self._run(self._source(tags={"title": "T"}), fake)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual([p.name for p in result.plan.stem_paths],
+                         ["T - 1 - low.wav", "T - 2 - tops.wav", "T - 3 - music.wav",
+                          "T - 4 - vocals.wav"])
+        self.assertTrue(all(p.is_file() for p in result.plan.stem_paths))
+
     def test_flags_override_tags(self):
         source = self._source(tags={"title": "T", "artist": "A", "album": "B"})
         result = self._run(source, naming=Naming(artist="FA", album="FB", title="FT"))

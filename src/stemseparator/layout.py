@@ -20,19 +20,21 @@ class TrackPlan:
     original_path: Path
 
 
-def _target_paths(album_dir: Path, title: str, suffix: str) -> tuple[tuple[Path, ...], Path]:
-    stems = tuple(album_dir / stem_file_name(title, i) for i in range(len(STEM_NAMES)))
+def _target_paths(album_dir: Path, title: str, suffix: str,
+                  stem_names: tuple[str, ...]) -> tuple[tuple[Path, ...], Path]:
+    stems = tuple(album_dir / stem_file_name(title, i, stem_names) for i in range(len(stem_names)))
     return stems, album_dir / ORIGINALS_DIR / f"{title}{suffix}"
 
 
 def plan_track(library: Path, artist: str, album: str, title: str, source: Path,
-               exists: Callable[[Path], bool] = Path.exists) -> TrackPlan:
+               exists: Callable[[Path], bool] = Path.exists,
+               stem_names: tuple[str, ...] = STEM_NAMES) -> TrackPlan:
     album_dir = (library / sanitise_name(artist, "Unknown Artist")
                  / sanitise_name(album, "Unknown Album"))
     base_title = sanitise_name(title, "Untitled")
     for attempt in count(1):
         candidate = base_title if attempt == 1 else f"{base_title} ({attempt})"
-        stems, original = _target_paths(album_dir, candidate, source.suffix)
+        stems, original = _target_paths(album_dir, candidate, source.suffix, stem_names)
         # StemDeck only checks stem 1, but an orphaned original must not be overwritten either.
         if not any(exists(path) for path in (*stems, original)):
             return TrackPlan(album_dir, candidate, stems, original)
