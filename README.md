@@ -1,5 +1,7 @@
 # stemseparator
 
+![The A³ setup: four StemDecks, the desk and A³ Motion](https://a3-audio.github.io/img/a3-setup.jpg)
+
 A local command-line tool that sends audio (FLAC, WAV or AIFF) to a rented cloud GPU, separates it into four stems and writes the result as a stem set for StemDeck (44.1 kHz, 24-bit FLAC or WAV).
 
 The separation runs on [Modal](https://modal.com) with models loaded through
